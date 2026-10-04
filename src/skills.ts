@@ -97,7 +97,7 @@ export class SkillLibrary {
     // Add relevant, pinned role recommendations without overflowing the prompt budget.
     if (profile.autoSkills) {
       const recommended = catalog.map(skill => ({ skill, score: recommendationScore(skill.id, role, task) }))
-        .filter(item => item.score > 0 && item.skill.provenance?.integrity).sort((a, b) => b.score - a.score);
+        .filter(item => item.score > 0 && (item.skill.source === 'builtin' || item.skill.provenance?.integrity)).sort((a, b) => b.score - a.score);
       let added = 0;
       for (const { skill } of recommended) {
         if (added >= 2 || selected.length >= 8) break;

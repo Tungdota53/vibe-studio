@@ -193,7 +193,7 @@ export class Agent {
         signal?.throwIfAborted();
         if (++toolCount > maxTools) throw new Error(`Agent đã dùng ${maxTools} lượt công cụ. Context được giữ; tăng ngân sách trong Thiết lập agent nếu nhiệm vụ cần thêm.`);
         this.log?.emit('tool_start', { agentId: this.id, tool: call.function.name });
-        const nonmutating = ['read_public_url', 'search_skills', 'load_skill', 'read_skill_resource', 'read_file', 'list_files', 'search_files', 'git_status', 'git_diff', 'git_log', 'recall_context', 'search_mcp_tools', 'activate_mcp_tools'].includes(call.function.name);
+        const nonmutating = ['inspect_project', 'read_public_url', 'search_skills', 'load_skill', 'read_skill_resource', 'read_file', 'list_files', 'search_files', 'git_status', 'git_diff', 'git_log', 'recall_context', 'search_mcp_tools', 'activate_mcp_tools'].includes(call.function.name);
         const journalTool = memoryOptions.journal?.beginTool(call, !nonmutating && !mcpSession.isReadOnly(call.function.name));
         budget.toolCall(); publishBudget();
         let value: {ok:boolean;[key:string]:unknown};

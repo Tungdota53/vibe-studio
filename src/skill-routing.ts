@@ -2,8 +2,11 @@ import type { Role } from './types.js';
 
 /** Reviewed bundled sources only. Local/user skills keep their existing opt-in rules. */
 export const skillRoutes: Record<string, { roles: Role[]; topics: string[]; requires?: string[] }> = {
+  'builtin:project-assessment': { roles: ['planner','reviewer'], topics: ['audit','security','bảo mật','khảo sát','dependency','electron'] },
+  'builtin:dependency-evidence': { roles: ['coder','tester','reviewer'], topics: ['dependency','npm audit','supply chain','chuỗi cung ứng','lỗ hổng'] },
+  'builtin:electron-security-review': { roles: ['coder','tester','reviewer'], topics: ['electron','desktop','preload','ipc','asar'] },
   'github:anthropic/frontend-design': { roles: ['coder'], topics: ['frontend', 'interface', 'ui', 'giao diện', 'thiết kế'] },
-  'github:anthropic/webapp-testing': { roles: ['tester'], topics: ['browser', 'playwright', 'website', 'web', 'giao diện'], requires: ['Python', 'Playwright', 'browser binaries'] },
+  'github:anthropic/webapp-testing': { roles: ['tester'], topics: ['browser', 'playwright', 'website', 'web', 'giao diện'], requires: ['Project browser test runtime (Node or Python)', 'Playwright', 'browser binaries'] },
   'github:openai/security-best-practices': { roles: ['coder', 'reviewer'], topics: ['security', 'bảo mật', 'authentication', 'authorization'] },
   'github:openai/security-threat-model': { roles: ['planner', 'reviewer'], topics: ['threat', 'đe dọa', 'trust boundary', 'attack surface'] },
   'github:superpowers/writing-plans': { roles: ['planner'], topics: ['plan', 'kế hoạch', 'implementation', 'triển khai'] },

@@ -78,7 +78,7 @@ export function recordEvidence(evidence: TaskEvidence, item: Message, calls: Map
     evidence.toolErrors++;
     if (!['run_tests', 'run_command'].includes(tool || '')) return;
   }
-  if (['read_file', 'git_diff', 'search_files'].includes(tool || '')) evidence.inspected = true;
+  if (['inspect_project', 'read_file', 'git_diff', 'search_files'].includes(tool || '')) evidence.inspected = true;
   if (!['run_tests', 'run_command'].includes(tool || '')) return;
   // Only the runner header is evidence. A string printed by the command body
   // (for example after an undefined exit code) cannot manufacture a passing run.

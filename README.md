@@ -131,3 +131,8 @@ Bản Setup và Portable được tạo trong thư mục `release`. Cấu hình 
 - Bản Windows hiện chưa có chữ ký số nhà phát hành.
 
 Giấy phép và thông tin nguồn của các skill được giữ cùng từng gói trong `src/vendor-skills`.
+
+### Kiểm tra dự án cục bộ
+
+- Công cụ `inspect_project` nhận diện Node/Electron, liệt kê dependency, dấu vết SHA-256, install hooks và ứng viên lỗi cấu hình Electron. Không chạy script hoặc cài dependency.
+- Ba skill tích hợp tự chọn theo vai: khảo sát dự án, bằng chứng dependency và rà soát Electron. Báo cáo phân biệt quan sát tĩnh với lỗ hổng đã xác minh; giữ UNVERIFIED khi chưa có kiểm tra thực thi.
