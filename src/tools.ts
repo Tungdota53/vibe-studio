@@ -1,4 +1,5 @@
 import { inspectProject } from './project-inspection.js';
+import crypto from 'node:crypto';
 import { runCommand } from './command-runner.js';
 import { CheckpointStore } from './checkpoints.js';
 import type { McpRegistry } from './mcp.js';
@@ -19,13 +20,21 @@ function reportInput(root:string,a:Record<string,unknown>){
 }
 export class Tools{constructor(public root:string,private approve:(description:string)=>Promise<boolean>=async()=>false,private role:Role='general',private skills=new SkillLibrary(root),private writeFiles?:string[],private readOnlyTask=false,private mcp?:McpRegistry){}setMcp(registry:McpRegistry){this.mcp=registry;return this}
 private checkpointStore?:CheckpointStore;private checkpointSession?:string;
+private writeBaseline?:Map<string,string|null>;
+private sourceHash(file:string){const target=safePath(this.root,file,true);return fs.existsSync(target)?crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex'):null}
+setWriteBaseline(){if(this.writeFiles?.length)this.writeBaseline=new Map(this.writeFiles.map(file=>[file,this.sourceHash(file)]));return this}
 setCheckpointContext(workspace:string,sessionId?:string){this.checkpointStore=new CheckpointStore(workspace);this.checkpointSession=sessionId;return this}
 async run(name:string,raw:string,signal?:AbortSignal):Promise<{ok:boolean;output?:string;error?:string;[key:string]:unknown}>{
-  if(!['write_file','write_report','edit_file','run_command','run_tests'].includes(name))return this.execute(name,raw,signal);
+  if(!['write_file','write_report','edit_file','run_command','run_tests'].includes(name)){
+    const result=await this.execute(name,raw,signal);
+    if(name==='read_file'&&result.ok&&this.writeBaseline){try{const file=String(JSON.parse(raw).path);for(const owned of this.writeBaseline.keys())if(safePath(this.root,owned,true)===safePath(this.root,file,true))this.writeBaseline.set(owned,this.sourceHash(owned));}catch{}}
+    return result;
+  }
   let checkpointId:string|undefined;
   try{
     signal?.throwIfAborted();if(!canUseTool(this.role,name,this.readOnlyTask))return{ok:false,error:`Role ${this.role} không được dùng ${name}`};
     const values=args.parse(JSON.parse(raw||'{}'));
+    if(this.writeBaseline&&['write_file','edit_file','run_command','run_tests'].includes(name))for(const [file,expected] of this.writeBaseline){if(this.sourceHash(file)!==expected)throw new Error(`Source conflict: ${file} changed outside this agent; inspect changes before retrying`);}
     const file=String(values.path||'');if(['write_file','write_report','edit_file'].includes(name)&&isSensitivePath(file))return{ok:false,error:'Sensitive file bị chặn'};let intendedContent:Record<string,string>|undefined;
     if(name==='write_file')intendedContent={[file]:String(values.content||'')};
     if(name==='write_report'){const report=reportInput(this.root,values);intendedContent={[report.file]:report.content};}
@@ -33,6 +42,7 @@ async run(name:string,raw:string,signal?:AbortSignal):Promise<{ok:boolean;output
     const store=this.checkpointStore||(this.checkpointStore=new CheckpointStore(this.root));
     checkpointId=store.begin({tool:name,scope:this.root,sessionId:this.checkpointSession,files:intendedContent?Object.keys(intendedContent):this.writeFiles?.length?this.writeFiles:undefined,intendedContent});
     const result=await this.execute(name,raw,signal);
+    if(this.writeBaseline)for(const file of this.writeBaseline.keys())this.writeBaseline.set(file,this.sourceHash(file));
     try{store.finish(checkpointId);}catch{return{...result,checkpointId,checkpointWarning:'Post-state snapshot unavailable; command outcome requires inspection before undo.'}}
     return{...result,checkpointId};
   }catch(error){if(checkpointId)try{this.checkpointStore?.finish(checkpointId);}catch{}return{ok:false,error:error instanceof Error?error.message:String(error),...(checkpointId?{checkpointId}:{})}}

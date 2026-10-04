@@ -19,6 +19,20 @@ Không gian làm việc AI trên Windows để trò chuyện với dự án, vi�
 - Câu trả lời có tiêu đề, danh sách, bảng, màu code và hiệu ứng streaming; sao chép toàn bộ câu trả lời hoặc từng khối code.
 - Đọc, tìm kiếm và chỉnh sửa tệp, xem Git diff, chạy lệnh và kiểm thử theo quyền của agent.
 - Kết nối nhà cung cấp API tương thích OpenAI bằng URL, khóa API và tên model.
+- Chọn chế độ Hỏi, Lập kế hoạch, Triển khai, Kiểm chứng hoặc Chẩn đoán/sửa; runtime áp dụng quyền theo chế độ.
+
+### Trung tâm điều hành phiên
+
+- Bổ sung yêu cầu trong lúc Teamwork chạy, ưu tiên task chưa chạy và tạm ngừng giao việc; giữ kế hoạch và kết quả đã hoàn tất.
+- Xem lỗi gốc, lần tự phục hồi, kiểm tra thất bại và task đang chờ kết quả.
+- Lưu ghi nhớ cùng hash tệp nguồn; loại khỏi context khi nguồn đổi. Học các bản sửa đã nghiệm thu với bằng chứng kiểm tra thực thi.
+- Xem timeline agent/model/lệnh/kết quả và diff theo checkpoint; xuất hồ sơ bàn giao Markdown/JSON.
+- Bật worktree cách ly cho dự án Git sạch. Tích hợp tệp đã nghiệm thu PASS sau khi kiểm tra xung đột với thay đổi người dùng, có checkpoint hoàn tác.
+- So sánh nguồn trước công cụ ghi của worker, giữ khóa tệp theo task và từ chối tên tệp Windows mơ hồ.
+- Hiển thị phạm vi kế hoạch; ước lượng token/thời gian từ telemetry trước, chi phí từ đơn giá được cấu hình.
+- Xem nguồn, commit, giấy phép, integrity và runtime cần thiết của skill trong Công cụ phiên.
+
+[Quy trình và giới hạn của trung tâm điều hành](docs/operations-center.md).
 
 ### Teamwork chạy song song
 
@@ -63,6 +77,7 @@ Không gian làm việc AI trên Windows để trò chuyện với dự án, vi�
 
 - Mở tệp HTML trong workspace để xem cùng CSS/JavaScript trên bảng preview riêng; tự tải lại khi tệp web thay đổi.
 - Hiển thị console, lỗi JavaScript và promise bị từ chối; hỗ trợ tải lại thủ công.
+- Kiểm tra bố cục 320px, phát hiện ứng viên tràn ngang/ảnh lỗi/thiếu nhãn và chụp vùng preview trong bản EXE. Quan sát lưu cùng hash HTML, cần bộ test browser để nghiệm thu luồng người dùng.
 - Preview chạy trong iframe cô lập, không có quyền truy cập backend và chặn tệp bí mật/nội bộ. Preview hiện hỗ trợ dự án web tĩnh; ứng dụng cần dev server phải build ra HTML trước.
 
 ### Kết nối nhiều MCP

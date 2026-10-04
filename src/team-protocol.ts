@@ -27,6 +27,7 @@ export function validateProtocol(tasks: Task[]) {
     if (task.role === 'general' && task.expectedFiles?.length) throw new Error(`Task ${task.id}: general chỉ trả lời; giao thay đổi source cho coder`);
     for (const file of task.expectedFiles || []) {
       if (!file || path.win32.isAbsolute(file) || path.posix.isAbsolute(file) || file.split(/[\\/]/).includes('..') || /[*?:\0]/.test(file)) throw new Error(`Task ${task.id}: expectedFiles phải là đường dẫn tệp tương đối chính xác`);
+      if(file.split(/[\\/]/).some(part=>!part||part==='.'||/[. ]$/.test(part)||/^\.git$|^\.vibe$|^node_modules$|^\.codex$/i.test(part)||/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part)))throw new Error(`Task ${task.id}: expectedFiles chứa tên tệp được bảo vệ hoặc mơ hồ`);
     }
   }
 }
@@ -34,7 +35,7 @@ export function validateProtocol(tasks: Task[]) {
 const validationRoles = new Set(['tester', 'reviewer', 'judge']);
 const ownedFiles = (task: Task) => (task.expectedFiles || []).map(file => path.posix.normalize(file.replace(/\\/g, '/')).toLowerCase());
 /** Fill available slots across phases; running tasks retain reservations until they finish. */
-export function executionBatch(tasks: Task[], limit: number): Task[] {
+export function executionBatch(tasks: Task[], limit: number, priorities = new Map<string,number>()): Task[] {
   // Start the longest remaining dependency chain first to reduce downstream waits.
   // This is a task-count heuristic; model runtimes are unknown at dispatch time.
   const dependents = new Map(tasks.map(task => [task.id, [] as string[]]));
@@ -49,7 +50,7 @@ export function executionBatch(tasks: Task[], limit: number): Task[] {
     const value = 1 + Math.max(0, ...(dependents.get(id) || []).map(rank));
     visiting.delete(id); ranks.set(id, value); return value;
   };
-  const ready = tasks.filter(task => task.status === 'ready').sort((a, b) => rank(b.id) - rank(a.id) || phases.indexOf(taskPhase(a)) - phases.indexOf(taskPhase(b)));
+  const ready = tasks.filter(task => task.status === 'ready').sort((a, b) => (priorities.get(b.id)||0)-(priorities.get(a.id)||0) || rank(b.id) - rank(a.id) || phases.indexOf(taskPhase(a)) - phases.indexOf(taskPhase(b)));
   const running = tasks.filter(task => task.status === 'running'), batch: Task[] = [];
   for (const task of ready) {
     if (running.length + batch.length >= limit) break;

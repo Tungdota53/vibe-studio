@@ -25,6 +25,7 @@ import { systemPrompt } from '../prompts.js';
 import { roleCatalog, roleProfile, roles, teamSchema, assignedAgent, defaultAgents } from '../roles.js';
 import { SkillLibrary } from '../skills.js';
 import { McpRegistry, mcpServersSchema } from '../mcp.js';
+import { Operations, operationMode, operationPolicy } from '../operations.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -116,6 +117,7 @@ export async function startStudio(options?: number | StudioOptions): Promise<Stu
   let teamworkState: any = null;
   let busy = false;
   const skills = new SkillLibrary(c.workspace);
+  const operations=new Operations(c.workspace);
   const integrations=new ProjectIntegrations(c.workspace);
   let integrationFingerprint='';
   const integrationSignature=(plan:any)=>JSON.stringify({project:plan.project,skills:plan.skills.slice(0,3).map((item:any)=>item.id),mcp:plan.mcp.map((item:any)=>item.id)});
@@ -361,6 +363,23 @@ export async function startStudio(options?: number | StudioOptions): Promise<Stu
           if(msg.type==='configure_integrations'){if(typeof msg.enabled!=='boolean')throw new Error('Thiết lập không hợp lệ');const file=path.join(c.workspace,'.vibe','config.json');let saved={};try{saved=JSON.parse(fs.readFileSync(file,'utf8'))}catch{}durableJson(file,{...saved,autoIntegrations:msg.enabled});c={...c,autoIntegrations:msg.enabled};ws.send(JSON.stringify({type:'integration_state',enabled:msg.enabled,plan:integrations.scan()}));return;}
           integrationBusy=true;integrationAbort=new AbortController();
           try{const result=await integrations.sync(c,String(msg.task || ''),message=>ws.send(JSON.stringify({type:'integration_progress',message})),integrationAbort.signal);c=result.config;client=new ModelClient(c);router=new ModelRouter(c);integrationFingerprint=integrationSignature(result.report);ws.send(JSON.stringify({type:'integration_state',enabled:c.autoIntegrations!==false,plan:result.report,report:result.report}));broadcast({type:'team_config',...teamConfig()});broadcast({type:'mcp_status',servers:result.report.connections});}finally{integrationBusy=false;integrationAbort=undefined;}return;
+        }
+        if(['get_operations','remember_project','forget_project','export_delivery','integrate_worktree','team_control','configure_execution','record_preview'].includes(msg.type)) {
+          const sessionId=String(msg.sessionId||'');
+          if(msg.type==='record_preview'){ws.send(JSON.stringify({type:'preview_recorded',record:operations.recordPreview(sessionId,String(msg.entry||''),msg.observation)}));return;}
+          if(msg.type==='configure_execution') {
+            if(busy||integrationBusy)throw new Error('Đợi phiên hoàn tất trước khi đổi cách thực thi');
+            if(typeof msg.isolated!=='boolean')throw new Error('Thiết lập không hợp lệ');
+            const file=path.join(c.workspace,'.vibe','config.json');let saved={};try{saved=JSON.parse(fs.readFileSync(file,'utf8'));}catch{}
+            c={...c,useWorktrees:msg.isolated};durableJson(file,{...saved,useWorktrees:msg.isolated});ws.send(JSON.stringify({type:'execution_config',isolated:c.useWorktrees}));return;
+          }
+          if(msg.type==='team_control'){if(!activeTeam)throw new Error('Chưa có Teamwork đang chạy');const result=activeTeam.control(sessionId,msg.action,msg.taskId,msg.text);ws.send(JSON.stringify({type:'team_control_result',sessionId,...result}));return;}
+          if(msg.type==='remember_project'){operations.remember(String(msg.text||''),msg.files);}
+          if(msg.type==='forget_project'){operations.forget(String(msg.id||''));}
+          if(msg.type==='export_delivery'){const result=operations.export(sessionId);ws.send(JSON.stringify({type:'delivery_export',sessionId,...result}));return;}
+          if(msg.type==='integrate_worktree'){if(busy||integrationBusy)throw new Error('Đợi phiên hoàn tất trước khi tích hợp');ws.send(JSON.stringify({type:'integration_result',sessionId,...operations.integrate(sessionId)}));return;}
+          const state=sessionId.startsWith('session-')?operations.inspect(sessionId):{sessionId,memory:operations.listMemory(),tasks:[],events:[],recovery:[]};
+          ws.send(JSON.stringify({type:'operations_state',...state,isolated:c.useWorktrees,skills:skills.list().map(({file,...skill})=>skill)}));return;
         }
         if (['get_workbench','pin_context','unpin_context','attach_context','detach_context','get_checkpoints','checkpoint_diff','restore_checkpoint','configure_budget','get_mcp_tools','start_preview','stop_preview'].includes(msg.type)) {
           const sessionId = String(msg.sessionId || '');
@@ -637,7 +656,8 @@ export async function startStudio(options?: number | StudioOptions): Promise<Stu
             const selected = msg.agentId ? c.namedAgents?.find(agent => agent.id === msg.agentId) : undefined;
             if (msg.agentId && !selected) throw new Error('Agent không tồn tại');
             assignedAgent(c, selected?.id, selected?.role || 'general');
-            const chatRole = selected?.role || 'general';
+            const mode=msg.mode?operationMode(msg.mode):undefined,policy=mode?operationPolicy(mode):undefined;
+            const chatRole = policy?.role || selected?.role || 'general';
             const sessionId = typeof msg.sessionId === 'string' && /^chat-[a-zA-Z0-9-]{1,80}$/.test(msg.sessionId) ? msg.sessionId : `chat-${crypto.randomUUID()}`;
             const memory = db.conversation(sessionId);
             db.session(sessionId, 'running', c.model, line.slice(0, 100));
@@ -674,11 +694,13 @@ export async function startStudio(options?: number | StudioOptions): Promise<Stu
               }
             }, [], {
               state: memory,
+              readOnlyTask:policy?.readOnly,
+              agentConfig:policy?{...c,agentProfiles:{...c.agentProfiles,[chatRole]:{...c.agentProfiles?.[chatRole],instructions:`${c.agentProfiles?.[chatRole]?.instructions||''}\n${policy.instruction}`}}}:undefined,
               journal: new RunJournal(c.workspace,sessionId),
               resume: msg.type === 'resume_chat',
               onBudget: stats => progress(sessionId,{type:'budget_update',...stats,message:stats.warnings.join(' · ') || `Đã dùng ${stats.tokens} token.`}),
               recall: (query, limit, beforeId) => db.recall(sessionId, query, limit, beforeId),
-              namedAgentId: selected?.id,
+              namedAgentId:mode?undefined:selected?.id,
               onModel: model => { activeModel = model; progress(sessionId, { type: 'model_selected', model, agentId: selected?.id || 'agent-general', status: 'running', message: `Đang dùng ${model}.` }); },
               onContext: event => {
                 if (event.type === 'context_stats') { event.stats.limitSource = 'runtime'; db.saveContext(sessionId, event.stats, activeModel); }

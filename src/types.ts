@@ -1,5 +1,6 @@
 export type Role = 'orchestrator'|'planner'|'coder'|'tester'|'reviewer'|'judge'|'general';
 export type TaskStatus = 'pending'|'ready'|'running'|'blocked'|'completed'|'failed'|'cancelled';
+export interface Task { changedFiles?: string[] }
 export type Quality = 'fast'|'balanced'|'high'|'max';
 export interface Task { id:string; title:string; description:string; role:Role; phase?:import('./team-protocol.js').Phase; acceptanceCriteria?:string[]; verificationCommands?:string[]; agentId?:string; agentName?:string; model?:string; skills?:string[]; loadedSkills?:string[]; status:TaskStatus; dependencies:string[]; expectedFiles?:string[]; assignedAgentId?:string; worktreePath?:string; createdAt:string; startedAt?:string; lastProgressAt?:string; step?:string; stalled?:boolean; completedAt?:string; resultSummary?:string; error?:string; retries?:number; }
 export interface AgentState { id:string; role:Role; status:'idle'|'running'|'waiting'|'failed'|'stopped'|'cancelled'; model:string; currentTaskId?:string; worktreePath?:string; startedAt?:string; lastActivityAt?:string; tokenUsage?:TokenUsage; }

@@ -50,6 +50,7 @@ export class Pipeline {
         return {
           id: task.id, title: task.title, phase: taskPhase(task), status: task.status, model: task.model,
           dependencies: task.dependencies, attempt: task.retries || 0, error: task.error || null,
+          changedFiles: task.changedFiles || [],
           criteria: task.acceptanceCriteria || [], requiredCommands: task.verificationCommands || [],
           evidence: proof ? { requiredPassed: (task.verificationCommands || []).filter(command => proof.checks?.some(check => check.exitCode === 0 && check.command.trim() === command.trim())).length, executionErrors: proof.executionErrors || [], inspected: proof.inspected, stale: proof.stale || false, checks: (proof.checks || []).map(check => ({ command: check.command, exitCode: check.exitCode, excerpt: check.excerpt.slice(0, 800), kind: isEnvironmentProbe(check.command, task.verificationCommands) ? 'probe' : isReportCommand(check.command, task.verificationCommands) ? 'artifact' : 'verification' })) } : null
         };

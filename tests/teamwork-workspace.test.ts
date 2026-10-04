@@ -32,6 +32,25 @@ function runner(root: string, plan: any[], reply: (messages: Message[]) => Promi
   return { team: new Teamwork(config, store, client, new ModelRouter(config), async () => false), store };
 }
 describe('Teamwork workspace mode', () => {
+  it('accepts an adjustment during the final model response without creating another plan',async()=>{
+    const dir=root();let release!:()=>void,started!:()=>void,calls=0;const waiting=new Promise<void>(resolve=>started=resolve),hold=new Promise<void>(resolve=>release=resolve);
+    const {team}=runner(dir,[{id:'answer',title:'Answer',description:'original',role:'general'}],async messages=>{
+      calls++;if(calls===1){started();await hold;return {content:'old response',toolCalls:[]};}
+      expect(messages.some(message=>message.content?.includes('new constraint'))).toBe(true);return {content:'updated response',toolCalls:[]};
+    });
+    let session='';const events:any[]=[];const run=team.run('Goal',event=>{if(typeof event!=='string'){events.push(event);if(event.type==='session_start')session=event.sessionId;}});await waiting;
+    expect(()=>team.control('session-00000000','adjust',undefined,'wrong session')).toThrow();
+    team.control(session,'adjust','answer','new constraint');release();const result=await run;
+    expect(result.tasks[0].resultSummary).toBe('updated response');expect(calls).toBe(2);expect(events.filter(event=>event.type==='planner_start')).toHaveLength(1);
+    expect(fs.readFileSync(path.join(dir,'.vibe','sessions',session,'adjustments.json'),'utf8')).toContain('new constraint');
+  });
+  it('pauses dispatch without losing tasks and resumes the same saved plan',async()=>{
+    const dir=root();let paused!:()=>void,calls=0,session='';const waiting=new Promise<void>(resolve=>paused=resolve);
+    const {team}=runner(dir,[{id:'answer',title:'Answer',description:'original',role:'general'}],async()=>{calls++;return {content:'done',toolCalls:[]};});
+    const run=team.run('Goal',event=>{if(typeof event==='string')return;if(event.type==='session_start')session=event.sessionId;if(event.type==='planner_done'){team.control(session,'pause');paused();}});
+    await waiting;await new Promise(resolve=>setTimeout(resolve,50));expect(calls).toBe(0);expect(team.tasks[0].status).toBe('ready');
+    team.control(session,'resume');const result=await run;expect(result.tasks[0].status).toBe('completed');expect(calls).toBe(1);expect(()=>team.control(session,'pause')).toThrow();
+  });
   it('automatically repairs an audit-only plan in manifest scope and obtains independent review',async()=>{
     const dir=root();fs.writeFileSync(path.join(dir,'package.json'),'{"private":true}');let fixed=false;const original=Tools.prototype.execute;
     vi.spyOn(Tools.prototype,'execute').mockImplementation(async function(this:Tools,name,raw,signal){if(name==='run_command'&&JSON.parse(raw).command==='npm audit --json')return {ok:fixed,output:fixed?'exit=0\n0 vulnerabilities':'exit=1\nhigh vulnerability',...(fixed?{}:{error:'audit failed'})};if(name==='write_file')fixed=true;return original.call(this,name,raw,signal);});

@@ -230,7 +230,7 @@ $('composer').onsubmit = event => {
   if (!config?.apiKey) { $('settings-status').textContent = 'Nhập khóa API để bắt đầu.'; $('settings-dialog').showModal(); return; }
   const teamwork = $('mode').value === 'teamwork';
   if (!currentSession) currentSession = `chat-${crypto.randomUUID()}`;
-  if (!send({ type: 'chat', prompt: teamwork ? `/teamwork ${prompt}` : prompt, sessionId: currentSession, agentId: teamwork ? undefined : $('chat-agent').value || undefined })) return;
+  if (!send({ type: 'chat', prompt: teamwork ? `/teamwork ${prompt}` : prompt, sessionId: currentSession, mode: ['ask','plan','execute','verify','repair'].includes($('mode').value)?$('mode').value:undefined, agentId: teamwork ? undefined : $('chat-agent').value || undefined })) return;
   setBusy(true); resetProgress(); assistant = null; response = ''; addMessage('user', prompt); progress({id:'run-request',message: teamwork ? 'Đang xử lý yêu cầu cho nhóm agent…' : 'Đã nhận yêu cầu · đang kết nối model…',status:'running'}); $('chat-title').textContent = prompt.slice(0, 80); $('prompt').value = ''; $('prompt').style.height = '';
 };
 $('prompt').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('composer').requestSubmit(); } };

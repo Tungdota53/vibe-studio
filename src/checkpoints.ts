@@ -69,9 +69,9 @@ export class CheckpointStore {
       return [{ id: checkpoint.id, sessionId: checkpoint.sessionId, tool: checkpoint.tool, createdAt: checkpoint.createdAt, status: checkpoint.status, warnings: checkpoint.warnings || [], files: [...new Set([...checkpoint.before.map(file => file.path), ...after.map(file => file.path)])].filter(file => before.get(file) !== after.find(image => image.path === file)?.hash), restoredFiles: checkpoint.restoredFiles || [] }];
     } catch { return []; } }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
-  diff(id: string) { const checkpoint = this.read(id), after = checkpoint.after || checkpoint.intended || []; return { id, status: checkpoint.status, files: [...new Set([...checkpoint.before.map(file => file.path), ...after.map(file => file.path)])].map(file => {
+  diff(id: string, maxFiles = 2000, maxChars = 20000) { const checkpoint = this.read(id), after = checkpoint.after || checkpoint.intended || []; return { id, status: checkpoint.status, files: [...new Set([...checkpoint.before.map(file => file.path), ...after.map(file => file.path)])].filter(file=>(checkpoint.before.find(image=>image.path===file)?.hash??null)!==(after.find(image=>image.path===file)?.hash??null)).slice(0,maxFiles).map(file => {
     const before = checkpoint.before.find(image => image.path === file), next = after.find(image => image.path === file);
-    const text = (image?: FileImage) => image?.data ? redact(Buffer.from(image.data, 'base64').toString('utf8').slice(0, 20000)) : '';
+    const text = (image?: FileImage) => image?.data ? redact(Buffer.from(image.data, 'base64').toString('utf8').slice(0, maxChars)) : '';
     return { path: file, before: text(before), after: text(next), beforeHash: before?.hash ?? null, afterHash: next?.hash ?? null, changed: (before?.hash ?? null) !== (next?.hash ?? null) };
   }).filter(file => file.changed) }; }
   restore(id: string, files: string[]) {

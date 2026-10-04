@@ -19,6 +19,7 @@
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
     "desktop": "npm run build && electron .",
     "desktop:pack": "npm run build && node scripts/build-desktop.mjs && electron-builder --win --x64 --publish never",
+    "desktop:release:check": "node scripts/release-preflight.mjs",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "test": "vitest run",

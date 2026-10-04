@@ -60,7 +60,7 @@ const model = http.createServer((req, res) => {
     res.end('data: ' + JSON.stringify({ choices: [{ delta: { content: text } }] }) + '\n\ndata: ' + JSON.stringify({ choices: [], usage: { prompt_tokens: 351, completion_tokens: 24, total_tokens: 375, prompt_tokens_details: { cached_tokens: 123 } } }) + '\n\ndata: [DONE]\n\n');
   });
 });
-const timer = setTimeout(() => { fs.writeFileSync('release/smoke-result.json', JSON.stringify({ ok: false, error: 'timeout' })); app.exit(1); }, 35000);
+const timer = setTimeout(() => { fs.writeFileSync('release/smoke-result.json', JSON.stringify({ ok: false, error: 'timeout' })); app.exit(1); }, 60000);
 async function wait(win, expression) {
   for (let i = 0; i < 150; i++) { if (await win.webContents.executeJavaScript(expression)) return; await new Promise(resolve => setTimeout(resolve, 100)); }
   throw new Error('UI timeout: ' + expression);
@@ -196,12 +196,23 @@ app.on('browser-window-created', (_, win) => {
       await win.webContents.executeJavaScript(`{const section=Array.from(document.querySelectorAll('.wb-section')).find(s=>s.querySelector('h3').textContent.includes('Ngân sách mỗi'));const inputs=section.querySelectorAll('input');inputs[0].value='500000';inputs[3].value='2';inputs[4].value='5';section.querySelector('form').requestSubmit();}`);
       await wait(win, `document.getElementById('toast').textContent.includes('Đã lưu ngân sách')`);
       const savedBudget=JSON.parse(fs.readFileSync(path.join(root,'.vibe','config.json'),'utf8'));assert.equal(savedBudget.runBudget.maxTokens,500000);assert(Object.values(savedBudget.modelRates).some(rate=>rate.inputPerMillion===2&&rate.outputPerMillion===5));
-      await win.webContents.executeJavaScript(`document.querySelector('#wb-content textarea').value='Keep the acceptance test';document.querySelector('#wb-content form').requestSubmit()`);
+      await wait(win, `document.getElementById('wb-operations')!==null`);
+      assert(await win.webContents.executeJavaScript(`document.getElementById('wb-operations').textContent.includes('Lỗi gốc và tự phục hồi') && document.querySelector('#wb-operations input[type=range]') && document.getElementById('wb-operations').textContent.includes('Nguồn skill và quyền')`));
+      await win.webContents.executeJavaScript(`{const section=Array.from(document.querySelectorAll('.wb-section')).find(s=>s.querySelector('h3').textContent==='Context được giữ');section.querySelector('textarea').value='Keep the acceptance test';section.querySelector('form').requestSubmit();}`);
       await wait(win, `document.getElementById('wb-content').textContent.includes('Ghi nhớ ·')`);
       await win.webContents.executeJavaScript(`document.getElementById('workbench-dialog').close()`);
       fs.writeFileSync(path.join(root,'preview-smoke.html'),'<html><head><title>Live preview</title></head><body><h1>Preview works</h1><script>console.log("preview-smoke-ok");throw new Error("preview-smoke-error")</script></body></html>');
       await win.webContents.executeJavaScript(`document.getElementById('preview-button').click();document.getElementById('preview-entry').value='preview-smoke.html';document.getElementById('preview-form').requestSubmit()`);
       await wait(win, `document.getElementById('preview-console').textContent.includes('preview-smoke-ok') && document.getElementById('preview-console').textContent.includes('preview-smoke-error')`);
+      await win.webContents.executeJavaScript(`document.getElementById('preview-mobile').click();document.getElementById('preview-inspect').click();`);
+      await wait(win, `document.getElementById('preview-console').textContent.includes('horizontalOverflow')`);
+      assert.equal(await win.webContents.executeJavaScript(`document.getElementById('web-preview').getBoundingClientRect().width`),320);
+      await win.webContents.executeJavaScript(`document.getElementById('preview-capture').click();`);
+      await wait(win, `document.getElementById('toast').textContent.includes('hash HTML')`);
+      for(let attempt=0;attempt<60;attempt++){const directory=path.join(root,'.vibe','preview-snapshots');if(fs.existsSync(directory)&&fs.readdirSync(directory).some(file=>file.endsWith('.png')))break;await new Promise(resolve=>setTimeout(resolve,100));}
+      assert(fs.readdirSync(path.join(root,'.vibe','preview-snapshots')).some(file=>file.endsWith('.png')));
+      assert(fs.readdirSync(path.join(root,'.vibe','operations','previews')).length>=2);
+      await win.webContents.executeJavaScript(`document.getElementById('preview-mobile').click();`);
       fs.writeFileSync(path.join(root,'preview-smoke.html'),'<html><head><title>Live preview update</title></head><body><script>console.log("preview-reloaded-ok")</script></body></html>');
       await wait(win, `document.getElementById('preview-console').textContent.includes('preview-reloaded-ok')`);
       await win.webContents.executeJavaScript(`document.getElementById('preview-close').click()`);

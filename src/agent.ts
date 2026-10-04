@@ -54,6 +54,7 @@ export interface AgentMemoryOptions {
   checkpoint?: (state: ConversationState) => void;
   onItem?: (message: Message) => void;
   recall?: (query: string, limit: number, beforeId?: number) => unknown;
+  updates?: () => string[];
 }
 
 export class Agent {
@@ -102,6 +103,9 @@ export class Agent {
     const repeatedFailures = new Map<string, number>();
     for (let iteration = 0, toolCount = 0; iteration < maxIterations; iteration++) {
       signal?.throwIfAborted();
+      for (const content of memoryOptions.updates?.() || []) {
+        const update: Message = {role:'user',content};state.messages.push(update);memoryOptions.onItem?.(update);checkpoint(state);
+      }
       const decision = this.router.route({ role: this.role, agentId: assigned?.id, taskType: 'coding', complexity: 5, contextTokens: context.stats(system, definitions).estimatedInput, requiresTools: true, requiresLongContext: false, preferQuality: ['reviewer', 'planner'].includes(this.role) }, config);
       let result, error: unknown, visibleOutput = false, recoveredPrefix = '', visiblePrefixLength = 0;
       const models = [decision.selectedModel, ...decision.fallbacks];
@@ -179,7 +183,12 @@ export class Agent {
       if (!result) throw error;
       const answer: Message = { role: 'assistant', content: result.content, ...(result.toolCalls.length ? { tool_calls: result.toolCalls } : {}) };
       memoryOptions.onItem?.(answer);
-      if (result.toolCalls.length === 0) { state.messages.push(answer); memoryOptions.journal?.finish(state); context.publish(system, definitions); return recoveredPrefix + result.content; }
+      if (result.toolCalls.length === 0) {
+        state.messages.push(answer);
+        const updates=memoryOptions.updates?.()||[];
+        if(updates.length){for(const content of updates){const update:Message={role:'user',content};state.messages.push(update);memoryOptions.onItem?.(update);}checkpoint(state);continue;}
+        memoryOptions.journal?.finish(state); context.publish(system, definitions); return recoveredPrefix + result.content;
+      }
       // Reject an oversized batch before executing any side effects. Otherwise a
       // budget failure midway through a batch loses the completed tool outcomes.
       if (toolCount + result.toolCalls.length > maxTools) {
@@ -192,7 +201,8 @@ export class Agent {
       for (const call of result.toolCalls) {
         signal?.throwIfAborted();
         if (++toolCount > maxTools) throw new Error(`Agent đã dùng ${maxTools} lượt công cụ. Context được giữ; tăng ngân sách trong Thiết lập agent nếu nhiệm vụ cần thêm.`);
-        this.log?.emit('tool_start', { agentId: this.id, tool: call.function.name });
+        let parameters:Record<string,unknown>={};try{const parsed=JSON.parse(call.function.arguments);parameters=Object.fromEntries(['path','cwd','command','query','id'].filter(key=>parsed[key]!==undefined).map(key=>[key,String(parsed[key]).slice(0,2000)]));}catch{}
+        this.log?.emit('tool_start', { agentId: this.id, tool: call.function.name, parameters });
         const nonmutating = ['inspect_project', 'read_public_url', 'search_skills', 'load_skill', 'read_skill_resource', 'read_file', 'list_files', 'search_files', 'git_status', 'git_diff', 'git_log', 'recall_context', 'search_mcp_tools', 'activate_mcp_tools'].includes(call.function.name);
         const journalTool = memoryOptions.journal?.beginTool(call, !nonmutating && !mcpSession.isReadOnly(call.function.name));
         budget.toolCall(); publishBudget();
@@ -222,7 +232,7 @@ export class Agent {
         const item: Message = { role: 'tool', tool_call_id: call.id, content: JSON.stringify(value) };
         memoryOptions.onItem?.(item);
         exchange.push({ ...item, content: context.toolContent(item.content!) });
-        this.log?.emit('tool_end', { agentId: this.id, tool: call.function.name, ok: value.ok });
+        this.log?.emit('tool_end', { agentId: this.id, tool: call.function.name, ok: value.ok, checkpointId:value.checkpointId, outcome:String(value.output||value.error||'').slice(0,3000) });
         if (!value.ok) {
           let argumentsValue: unknown; try { argumentsValue = JSON.parse(call.function.arguments); } catch { argumentsValue = call.function.arguments; }
           const signature = JSON.stringify([call.function.name, argumentsValue, value.error]);

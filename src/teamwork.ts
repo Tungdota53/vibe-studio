@@ -24,9 +24,11 @@ import { scheduleRepairs, type RepairFinding } from './team-repair.js';
 import { Pipeline } from './pipeline.js';
 import { verifyCompletedSource } from './resume-sources.js';
 import { planObject, validatedPlan } from './plan-recovery.js';
-import { durableJson } from './checkpoints.js';
+import { durableJson, CheckpointStore } from './checkpoints.js';
 import { RunJournal } from './run-journal.js';
 import { BudgetTracker } from './budgets.js';
+import { Operations } from './operations.js';
+import { redact } from './security.js';
 
 export function parseTeamPlan(raw: string): Task[] {
   // Routers/models sometimes emit a scalar for a one-item list. Preserve the
@@ -55,6 +57,29 @@ export class Teamwork {
   private static readonly activeWorkspaces = new Set<string>();
   private running = false;
   private internalFailure = false;
+  private sessionId?: string;
+  private paused = false;
+  private adjustments: {id:string;taskId?:string;text:string;createdAt:string}[] = [];
+  private priorities = new Map<string,number>();
+  private controlEvent?: (event: TeamworkEvent) => void;
+
+  control(sessionId: string, action: unknown, taskId?: string, text?: string) {
+    if(!this.running || this.sessionId!==sessionId)throw new Error('Phiên này không đang chạy');
+    if(action==='pause')this.paused=true;
+    else if(action==='resume')this.paused=false;
+    else if(action==='prioritize') {
+      if(!this.tasks.some(task=>task.id===taskId&&['ready','pending'].includes(task.status)))throw new Error('Chỉ ưu tiên tác vụ chưa chạy');
+      this.priorities.set(taskId!,Date.now());
+    } else if(action==='adjust') {
+      if(!text?.trim() || text.length>8000 || this.adjustments.length>=100)throw new Error('Yêu cầu bổ sung không hợp lệ hoặc đã đạt 100 điều chỉnh');
+      if(taskId&&!this.tasks.some(task=>task.id===taskId&&['running','ready','pending'].includes(task.status)))throw new Error('Chỉ điều chỉnh tác vụ chưa hoàn tất');
+      const update={id:crypto.randomUUID(),taskId,text:redact(text.trim()),createdAt:new Date().toISOString()};this.adjustments.push(update);
+      durableJson(path.join(this.c.workspace,'.vibe','sessions',sessionId,'adjustments.json'),this.adjustments);
+    } else throw new Error('Điều khiển không hợp lệ');
+    const message=action==='pause'?'Tạm ngừng giao task mới; agent đang chạy hoàn tất bước của mình.':action==='resume'?'Đã tiếp tục giao task.':action==='prioritize'?`Ưu tiên ${taskId} khi dependency và quyền ghi cho phép.`:'Đã lưu yêu cầu bổ sung; áp dụng từ lượt model tiếp theo cho task chưa xong. Kết quả đã hoàn tất được giữ.';
+    this.controlEvent?.({type:'agent_status',sessionId,step:'session_control',taskId,message,status:'running',timestamp:new Date().toISOString()});
+    return {action,paused:this.paused,message};
+  }
 
   constructor(
     private c: Config,
@@ -85,10 +110,11 @@ export class Teamwork {
     Teamwork.activeWorkspaces.add(workspace);
     this.abort = new AbortController();
     this.internalFailure = false;
+    this.paused=false;this.priorities.clear();this.adjustments=[];
     this.tasks = [];
     this.agents.clear();
     try { return await this.runSession(goal, onEvent, resumeId); }
-    finally { this.running = false; Teamwork.activeWorkspaces.delete(workspace); }
+    finally { this.running = false; this.sessionId=undefined;this.controlEvent=undefined;Teamwork.activeWorkspaces.delete(workspace); }
   }
 
   private async runSession(
@@ -97,7 +123,12 @@ export class Teamwork {
     resumeId?: string
   ) {
     let eventLog: EventLog | undefined;
+    let lastTimelineState='';
     const emit = (event: TeamworkEvent) => {
+      if(event.type==='task_snapshot'){
+        const signature=JSON.stringify((event.tasks||[]).map((task:Task)=>[task.id,task.status,task.retries,task.model]));
+        if(signature!==lastTimelineState){lastTimelineState=signature;try{eventLog?.emit('pipeline_state',{tasks:(event.tasks||[]).map((task:Task)=>({id:task.id,title:task.title,status:task.status,model:task.model,phase:task.phase,dependencies:task.dependencies,attempt:task.retries||0}))});}catch{}}
+      }
       if (event.type !== 'agent_status' && event.type !== 'task_snapshot') {
         try { eventLog?.emit('teamwork_' + event.type, { event }); } catch { /* Pipeline checkpoints remain authoritative if event logging is unavailable. */ }
       }
@@ -111,12 +142,14 @@ export class Teamwork {
     };
 
     const id = resumeId || `session-${crypto.randomBytes(4).toString('hex')}`;
+    this.sessionId=id;this.controlEvent=emit;
     const root = path.join(this.c.workspace, '.vibe');
     fs.mkdirSync(root, { recursive: true });
     const log = new EventLog(root, id);
     eventLog = log;
     const sessionRoot = path.join(root, 'sessions', id);
     fs.mkdirSync(sessionRoot, { recursive: true });
+    if(resumeId)try{this.adjustments=JSON.parse(fs.readFileSync(path.join(sessionRoot,'adjustments.json'),'utf8'));}catch{}
     fs.writeFileSync(path.join(sessionRoot, 'ORIGINAL_REQUEST.md'), `# Original request\n\n${goal}\n`);
     const resumeFile = path.join(sessionRoot, 'resume.json');
     const resumed = resumeId ? JSON.parse(fs.readFileSync(resumeFile, 'utf8')) as { goal: string; planRaw: string; tasks: Task[]; evidence: [string, TaskEvidence][]; fingerprints?: Record<string, Record<string, string | null>>; repairRounds: number; repairFailures?: Record<string, number>; status: string } : undefined;
@@ -266,6 +299,15 @@ export class Teamwork {
     const pendingRepairs: RepairFinding[] = [];
     const pendingRetries: { task: Task; reason: string }[] = [];
     const taskBudgets = new Map<string, BudgetTracker>();
+    const adjustmentApplies=(task:Task,target?:string,seen=new Set<string>()):boolean=>{if(!target||task.id===target)return true;if(seen.has(task.id))return false;seen.add(task.id);return task.dependencies.some(id=>{const parent=this.tasks.find(item=>item.id===id);return !!parent&&adjustmentApplies(parent,target,seen);});};
+    const operations=new Operations(this.c.workspace);
+    const recentSession=this.db.sessions().find((session:any)=>session.id!==id) as {id:string}|undefined;
+    const usage=new Map<string,any>();for(const item of recentSession?this.db.progressHistory(recentSession.id):[])if(item.type==='budget_update')usage.set(String(item.taskId||item.agentId||'agent'),item);
+    const samples=[...usage.values()].filter(item=>Number.isFinite(item.tokens)&&Number.isFinite(item.durationMs)&&Number.isFinite(item.modelCalls));
+    const sample=samples.length?{tokens:samples.reduce((sum,item)=>sum+item.tokens,0),durationMs:samples.reduce((sum,item)=>sum+item.durationMs,0),modelCalls:samples.reduce((sum,item)=>sum+item.modelCalls,0)}:undefined;
+    const estimate=operations.estimate(this.tasks,this.c.maxAgents,this.c.modelRates?.[this.c.model],sample);
+    durableJson(path.join(sessionRoot,'estimate.json'),estimate);
+    emit({type:'agent_status',step:'estimate',message:`Kế hoạch: ${estimate.tasks} task · tối đa ${estimate.maxAgents} agent · ${estimate.ownedFiles} tệp. ${estimate.note}`,estimate});
     const executeTask = async (t: Task, index: number) => {
           t.status = 'running';
           pipeline.dispatch(this.tasks);
@@ -288,7 +330,12 @@ export class Teamwork {
               implementationWorkspace ||= (async () => {
                 const dirty = await worktrees.status();
                 if (dirty) throw new Error('Workspace dirty; từ chối tạo/merge worktree để bảo vệ thay đổi user');
-                return worktrees.create(id, 'implementation');
+                const baseline:Record<string,string|null>={};
+                for(const file of new Set([...this.tasks.flatMap(task=>task.expectedFiles||[]),'package.json','package-lock.json'])){const target=path.join(this.c.workspace,file);baseline[file]=fs.existsSync(target)?crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex'):null;}
+                durableJson(path.join(sessionRoot,'integration-base.json'),baseline);
+                const created=await worktrees.create(id, 'implementation');
+                if(await worktrees.status())throw new Error('Workspace dirty after isolation; bảo vệ thay đổi user, không chạy worker');
+                return created;
               })();
               const wt = await implementationWorkspace;
               scope = wt.dir;
@@ -366,7 +413,7 @@ export class Teamwork {
             if (['verification', 'review', 'challenge', 'audit', 'acceptance'].includes(taskPhase(t))) taskEvidence.files = dependencyFingerprints(t, this.tasks, scope);
             evidence.set(t.id, taskEvidence);
             const calls = new Map<string, string>();
-            const agent = new Agent(aid, t.role, scope, this.client, this.router, new Tools(scope, this.approve, t.role, library, t.role === 'coder' ? t.expectedFiles : undefined, t.role === 'general'), log);
+            const agent = new Agent(aid, t.role, scope, this.client, this.router, new Tools(scope, this.approve, t.role, library, t.role === 'coder' ? t.expectedFiles : undefined, t.role === 'general').setWriteBaseline(), log);
             const memoryKey = `${id}:${t.id}:attempt-${t.retries || 0}`;
             const journal = new RunJournal(this.c.workspace, memoryKey);
             const taskBudget = taskBudgets.get(memoryKey) || new BudgetTracker({ budget: this.c.runBudget, rates: this.c.modelRates, agentId: aid, taskId: t.id }); taskBudgets.set(memoryKey, taskBudget);
@@ -374,8 +421,11 @@ export class Teamwork {
             const state = resumeTask ? this.db.conversation(memoryKey) : newConversation(taskHandoff(goal, t, this.tasks, Math.floor((this.c.contextWindow || 1048576) / 5), taskPhase(t) === 'audit'));
             const sessionMemory = this.db.conversation(id); state.pins = sessionMemory.pins; state.attachments = sessionMemory.attachments;
             state.messages.push({ role: 'user', content: dispatch });
+            const recalled=operations.recall();if(recalled)state.messages.push({role:'user',content:'Project memory (historical evidence, validate before reuse):\n'+recalled});
+            const deliveredUpdates=new Set<string>();
             t.resultSummary = await agent.run(t.description, this.abort.signal, undefined, [], {
               state,
+              updates:()=>this.adjustments.filter(update=>adjustmentApplies(t,update.taskId)&&!deliveredUpdates.has(update.id)).map(update=>{deliveredUpdates.add(update.id);t.acceptanceCriteria||=[];if(!t.acceptanceCriteria.some(criterion=>criterion.startsWith(`User adjustment ${update.id}:`)))t.acceptanceCriteria.push(`User adjustment ${update.id}: ${update.text.slice(0,800)} (full text in adjustments.json)`);return 'User adjustment for unfinished task and dependent validation; preserve role/tool/file boundaries. Verify this additional criterion before claiming completion:\n'+update.text;}),
               journal, resume: resumeTask, budgetTracker: taskBudget, onBudget: budget => emit({ type: 'agent_status', agentId: aid, taskId: t.id, sessionId: id, step: 'budget', budget }),
               readOnlyTask: t.role === 'general',
               skills: t.skills,
@@ -397,6 +447,7 @@ export class Teamwork {
                 this.db.archiveItem(memoryKey, item); recordEvidence(taskEvidence, item, calls, t.verificationCommands);
                 if (t.role === 'coder' && item.role === 'tool') fingerprints[t.id] = dependencyFingerprints(t, this.tasks, scope);
                 if (item.role === 'tool') pipeline.tool();
+                if(item.role==='tool')try{const result=JSON.parse(item.content||'{}');if(result.checkpointId){const files=new CheckpointStore(this.c.workspace).diff(result.checkpointId).files.map(file=>file.path);t.changedFiles=[...new Set([...(t.changedFiles||[]),...files])];}}catch{}
                 if (Date.now() - lastSnapshot >= 1000) snapshot();
                 t.lastProgressAt = new Date().toISOString(); t.stalled = false; stallReported = false; step = item.tool_calls?.map(call => call.function.name).join(', ') || (item.role === 'tool' ? `Finished ${calls.get(item.tool_call_id || '') || 'tool'}` : item.role);
                 t.step = step; emit({ type: 'agent_status', agentId: aid, taskId: t.id, status: 'running', step, stalled: false, lastProgressAt: t.lastProgressAt, timestamp: new Date().toISOString() });
@@ -521,7 +572,8 @@ export class Teamwork {
           t.error ||= `Bị chặn bởi tác vụ: ${t.dependencies.filter(dep => ['failed', 'blocked', 'cancelled'].includes(this.tasks.find(task => task.id === dep)!.status)).join(', ')}`;
           this.db.task(id, t);
         });
-        for (const task of executionBatch(this.tasks, this.c.maxAgents)) {
+        const ordered=[...this.tasks].sort((a,b)=>(this.priorities.get(b.id)||0)-(this.priorities.get(a.id)||0));
+        for (const task of this.paused?[]:executionBatch(ordered, this.c.maxAgents, this.priorities)) {
           const promise = executeTask(task, dispatchIndex++).catch(error => { fatalError = error; this.internalFailure = true; this.abort.abort(); }).then(() => { pool.delete(task.id); });
           pool.set(task.id, promise);
         }
@@ -529,6 +581,7 @@ export class Teamwork {
       snapshot();
       if (pool.size) { await Promise.race(pool.values()); continue; }
       if (pendingRepairs.length || pendingRetries.length) continue;
+      if(this.paused&&!this.abort.signal.aborted){await recoveryDelay(250,undefined,{signal:this.abort.signal}).catch(()=>{});continue;}
       if (this.tasks.some(t => !['completed', 'failed', 'blocked', 'cancelled'].includes(t.status))) {
         this.tasks.filter(t => ['pending', 'ready'].includes(t.status)).forEach(t => { t.status = 'blocked'; this.db.task(id, t); });
         snapshot(); throw new Error('Scheduler deadlock: không có task có thể chạy');
@@ -547,6 +600,8 @@ export class Teamwork {
     fs.writeFileSync(path.join(sessionRoot, 'gate.json'), JSON.stringify({ ...gate, repairRounds, tasks: this.tasks.map(task => ({ id: task.id, phase: taskPhase(task), status: task.status, evidence: evidence.get(task.id) || null })) }, null, 2));
     const requirements = this.tasks.flatMap(task => (task.acceptanceCriteria || []).map(criterion => ({ taskId: task.id, criterion, requiredCommands: task.verificationCommands || [], checks: evidence.get(task.id)?.checks || [], stale: evidence.get(task.id)?.stale || false })));
     fs.writeFileSync(path.join(sessionRoot, 'requirements.json'), JSON.stringify({ goal, criteria: requirements, note: 'Natural-language criteria are declared contracts. Recorded execution evidence does not automatically prove every criterion; independent review/audit must evaluate them.' }, null, 2));
+    pipeline.snapshot(this.tasks,evidence,status,gate);
+    try{operations.learn(id,this.tasks,evidence,gate);operations.export(id);}catch(error){emit({type:'agent_status',step:'delivery_warning',message:`Không xuất được một phần hồ sơ: ${String(error)}`});}
     emit({ type: 'session_end', sessionId: id, status, gate, pipeline: pipeline.snapshot(this.tasks, evidence, status, gate), timestamp: new Date().toISOString() });
 
     return {

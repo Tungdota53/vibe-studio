@@ -66,6 +66,22 @@ else {
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.webContents.on('will-navigate', (event, url) => { if (!currentUrl || new URL(url).origin !== new URL(currentUrl).origin) event.preventDefault(); });
     ipcMain.handle('window-control', (event, action) => { trusted(event); if (action === 'minimize') win.minimize(); if (action === 'maximize') win.isMaximized() ? win.unmaximize() : win.maximize(); if (action === 'close') win.close(); });
+    ipcMain.handle('capture-preview', async (event, rect) => {
+      trusted(event);
+      const [width,height]=win.getContentSize();
+      if(!rect||!['x','y','width','height'].every(key=>Number.isInteger(rect[key]))||rect.x<0||rect.y<0||rect.width<1||rect.height<1||rect.x+rect.width>width||rect.y+rect.height>height)throw new Error('Vùng chụp không hợp lệ');
+      const full=await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true});
+      const size=full.getSize(),scaleX=size.width/width,scaleY=size.height/height;
+      const image=full.crop({x:Math.floor(rect.x*scaleX),y:Math.floor(rect.y*scaleY),width:Math.floor(rect.width*scaleX),height:Math.floor(rect.height*scaleY)});
+      if(image.isEmpty())throw new Error('Preview chưa sẵn sàng để chụp');
+      const workspace=settings.workspace||process.env.VIBE_WORKSPACE||path.join(app.getPath('documents'),'Vibe Projects');
+      const directory=path.join(workspace,'.vibe','preview-snapshots');
+      fs.mkdirSync(directory,{recursive:true});
+      // Reject redirected storage instead of writing outside this project's state.
+      const relative=path.relative(fs.realpathSync(workspace),fs.realpathSync(directory));
+      if(path.isAbsolute(relative)||relative==='..'||relative.startsWith('..'+path.sep))throw new Error('Snapshot storage redirected outside project');
+      const file=path.join(directory,crypto.randomUUID()+'.png');fs.writeFileSync(file,image.toPNG(),{flag:'wx'});return {file:path.relative(workspace,file),width:rect.width,height:rect.height};
+    });
     ipcMain.handle('choose-workspace', async event => {
       trusted(event); if (switching) return false;
       const result = await dialog.showOpenDialog(win, { title: 'Chọn thư mục dự án', properties: ['openDirectory', 'createDirectory'] });

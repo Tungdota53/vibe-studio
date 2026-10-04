@@ -66,6 +66,20 @@ async function harness(configuration: Record<string, unknown> = {}, prepare?: (r
 }
 
 describe('Studio workbench WebSocket APIs', () => {
+  it('exposes project memory and execution settings, and rejects controls for inactive sessions',async()=>{
+    const {root,socket}=await harness({autoIntegrations:false},root=>fs.writeFileSync(path.join(root,'source.txt'),'v1'));
+    const memory=await socket.request({type:'remember_project',sessionId:'chat-one',text:'Project fact',files:['source.txt']},'operations_state');expect(memory.memory[0].stale).toBe(false);
+    fs.writeFileSync(path.join(root,'source.txt'),'v2');const stale=await socket.request({type:'get_operations',sessionId:'chat-one'},'operations_state');expect(stale.memory[0].stale).toBe(true);
+    expect((await socket.request({type:'configure_execution',isolated:false},'execution_config')).isolated).toBe(false);
+    expect(JSON.parse(fs.readFileSync(path.join(root,'.vibe','config.json'),'utf8')).useWorktrees).toBe(false);
+    expect((await socket.request({type:'team_control',sessionId:'session-abcdef12',action:'pause'},'error')).message).toContain('Teamwork');
+  });
+  it('enforces verify mode source restrictions even when a writable agent is selected',async()=>{
+    vi.stubEnv('VIBE_API_KEY','fixture-only-key');vi.spyOn(ModelClient.prototype,'modelLimits').mockResolvedValue(undefined);let calls=0;
+    vi.spyOn(ModelClient.prototype,'chat').mockImplementation(async messages=>{calls++;if(calls===1)return {content:'',model:'test-model',toolCalls:[{id:'write',type:'function',function:{name:'write_file',arguments:'{"path":"a.txt","content":"should not write"}'}}]};expect(messages.findLast(item=>item.role==='tool')?.content).toContain('không được');return {content:'blocked as expected',model:'test-model',toolCalls:[]};});
+    const {root,socket}=await harness({autoIntegrations:false,namedAgents:[{id:'coder',name:'Coder',role:'coder',enabled:true,model:'',instructions:'',skills:[]}]});
+    await socket.request({type:'chat',prompt:'Verify',mode:'verify',agentId:'coder',sessionId:'chat-one'},'run_end');expect(fs.existsSync(path.join(root,'a.txt'))).toBe(false);
+  });
   it('resumes past an older repair snapshot superseded by repair-2 without rerunning coders or planning', async () => {
     vi.stubEnv('VIBE_API_KEY','fixture-only-key');vi.spyOn(ModelClient.prototype,'modelLimits').mockResolvedValue(undefined);
     const chat=vi.spyOn(ModelClient.prototype,'chat').mockResolvedValue({content:'continued',toolCalls:[],model:'test-model'}),id='session-aabbccdd';
