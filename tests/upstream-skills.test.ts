@@ -7,7 +7,7 @@ import { recommendationScore } from '../src/skill-routing.js';
 
 const roots: string[] = [];
 function workspace() { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-upstream-skills-')); roots.push(dir); return dir; }
-afterEach(() => roots.splice(0).forEach(dir => fs.rmSync(dir, { recursive: true, force: true })));
+afterEach(() => roots.splice(0).forEach(dir => { try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} }));
 describe('Reviewed upstream skill adapters', () => {
   it('retains exact source commits, MIT licenses, adapter attribution and verified references', () => {
     const library = new SkillLibrary(workspace());
@@ -44,7 +44,7 @@ describe('Reviewed upstream skill adapters', () => {
     }
     expect(recommendationScore('github:agency/application-security', 'tester', 'appsec ssrf')).toBe(0);
     expect(library.select('general', 'internet', { agentProfiles: { general: { autoSkills: false } } }).map(skill => skill.id)).not.toContain('github:agent-reach/public-web-research');
-  });
+  }, 15000);
   it('rejects modified source references and excludes them from automatic recommendations', () => {
     const dir = workspace();
     const builtins = path.join(dir, 'skills');

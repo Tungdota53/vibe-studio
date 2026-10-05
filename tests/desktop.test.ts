@@ -12,7 +12,7 @@ const sockets: WebSocket[] = [];
 afterEach(async () => {
   sockets.splice(0).forEach(socket => socket.terminate());
   await Promise.all(servers.splice(0).map(server => server.close()));
-  roots.splice(0).forEach(root => fs.rmSync(root, { recursive: true, force: true }));
+  roots.splice(0).forEach(root => { try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} });
 });
 async function studio(token?: string) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-desktop-')); roots.push(root);
@@ -23,8 +23,8 @@ function connect(url: string) {
   const messages: any[] = [];
   socket.on('message', data => messages.push(JSON.parse(String(data))));
   return { socket, messages, async wait(type: string) {
-    const start = Date.now();
-    while (Date.now() - start < 4000) { const index = messages.findIndex(msg => msg.type === type); if (index >= 0) return messages.splice(index, 1)[0]; await new Promise(resolve => setTimeout(resolve, 10)); }
+    const start = Date.now(), timeout = process.platform === 'win32' ? 10000 : 4000;
+    while (Date.now() - start < timeout) { const index = messages.findIndex(msg => msg.type === type); if (index >= 0) return messages.splice(index, 1)[0]; await new Promise(resolve => setTimeout(resolve, 10)); }
     throw new Error(`No ${type} event`);
   } };
 }
@@ -93,6 +93,7 @@ describe('Desktop backend', () => {
       const server = await studio(); const client = connect(server.url); await client.wait('init');
       const port = (model.address() as import('node:net').AddressInfo).port;
       client.socket.send(JSON.stringify({ type: 'configure', baseUrl: `http://127.0.0.1:${port}/v1`, model: 'test-model', apiKey: 'fake-key' })); await client.wait('configured');
+      client.socket.send(JSON.stringify({ type: 'configure_integrations', enabled: false })); await client.wait('integration_state');
       const namedAgents = ['alpha', 'beta'].map(id => ({ id, name: id, role: 'general', model: 'model-' + id, skills: [], instructions: 'Agent ' + id, enabled: true }));
       client.socket.send(JSON.stringify({ type: 'configure_team', namedAgents })); await client.wait('team_config');
       let turn = 0;

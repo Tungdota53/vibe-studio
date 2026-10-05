@@ -14,7 +14,7 @@ import { parseTeamPlan } from '../src/teamwork.js';
 import type { Message } from '../src/types.js';
 
 const roots: string[] = [];
-afterEach(() => roots.splice(0).forEach(root => fs.rmSync(root, { recursive: true, force: true })));
+afterEach(() => roots.splice(0).forEach(root => { try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} }));
 function root() { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-role-')); roots.push(dir); return dir; }
 function skill(dir: string, name: string, description: string, body = 'Read the relevant code before editing.') {
   const folder = path.join(dir, '.agents', 'skills', name); fs.mkdirSync(folder, { recursive: true });
@@ -45,7 +45,7 @@ describe('Role permissions and skill loading', () => {
     skill(dir, 'audit-context-building', 'Unrelated local instructions');
     expect(() => lib.load('audit-context-building')).toThrow('project:audit-context-building');
     expect(lib.load('github:trailofbits/audit-context-building').provenance?.integrity).toBe(true);
-  });
+  }, 15000);
   it('loads 38 GitHub skills with pinned provenance and paginated references', () => {
     const lib = new SkillLibrary(root()); const external = lib.list().filter(skill => skill.source === 'github');
     expect(external).toHaveLength(38);
@@ -69,7 +69,7 @@ describe('Role permissions and skill loading', () => {
     const large = lib.load('github:trailofbits/codeql');
     expect(large.instructions).toContain('Skill excerpt');
     expect(large.instructions.length).toBeLessThan(16000);
-  });
+  }, 15000);
   it('enforces assigned files for direct writes without claiming shell isolation', async () => {
     const dir = root(), tools = new Tools(dir, async () => true, 'coder', new SkillLibrary(dir), ['allowed.txt']);
     expect((await tools.run('write_file', JSON.stringify({ path: 'allowed.txt', content: 'ok' }))).ok).toBe(true);

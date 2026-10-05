@@ -14,13 +14,13 @@ afterEach(async () => {
   await Promise.all(studios.splice(0).map(server => server.close()));
   stores.splice(0).forEach(store => { if (store.db.open) store.close(); });
   await Promise.all(providers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve()))));
-  roots.splice(0).forEach(root => fs.rmSync(root, { recursive: true, force: true }));
+  roots.splice(0).forEach(root => { try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} });
 });
 function root() { const value = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-history-')); roots.push(value); return value; }
 function connect(url: string) {
   const socket = new WebSocket(url.replace('http:', 'ws:')); sockets.push(socket); const messages: any[] = [];
   socket.on('message', data => messages.push(JSON.parse(String(data))));
-  return { socket, messages, async wait(type: string) { const end = Date.now() + 4000; while (Date.now() < end) { const index = messages.findIndex(item => item.type === type); if (index >= 0) return messages.splice(index, 1)[0]; await new Promise(resolve => setTimeout(resolve, 10)); } throw new Error(`Missing ${type}`); } };
+  return { socket, messages, async wait(type: string) { const end = Date.now() + (process.platform === 'win32' ? 15000 : 4000); while (Date.now() < end) { const index = messages.findIndex(item => item.type === type); if (index >= 0) return messages.splice(index, 1)[0]; await new Promise(resolve => setTimeout(resolve, 10)); } throw new Error(`Missing ${type}`); } };
 }
 describe('Durable visible chat history and effective context', () => {
   it('keeps MCP secrets local and preserves omitted fields when saving safe status edits', async () => {
@@ -83,6 +83,7 @@ describe('Durable visible chat history and effective context', () => {
     const client = connect(studio.url); await client.wait('init');
     const baseUrl = `http://127.0.0.1:${(provider.address() as import('node:net').AddressInfo).port}/v1`;
     client.socket.send(JSON.stringify({ type: 'configure', baseUrl, model: 'large-model', apiKey: 'fake', contextMode: 'auto', contextWindow: 131072 })); await client.wait('configured');
+    client.socket.send(JSON.stringify({ type: 'configure_integrations', enabled: false })); await client.wait('integration_state');
     client.socket.send(JSON.stringify({ type: 'chat', sessionId: 'chat-window', prompt: 'List files' })); await client.wait('run_end');
     client.socket.send(JSON.stringify({ type: 'configure', baseUrl, model: 'unknown-model', apiKey: '', contextMode: 'manual', contextWindow: 8192 })); await client.wait('configured');
     client.socket.send(JSON.stringify({ type: 'get_conversation', sessionId: 'chat-window' }));

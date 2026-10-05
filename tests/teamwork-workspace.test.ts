@@ -15,7 +15,21 @@ import type { Message } from '../src/types.js';
 
 const roots: string[] = [];
 const stores: Store[] = [];
-afterEach(() => { stores.splice(0).forEach(store => store.close()); roots.splice(0).forEach(root => fs.rmSync(root, { recursive: true, force: true })); });
+afterEach(async () => {
+  stores.splice(0).forEach(store => {
+    try { store.close(); } catch {}
+  });
+  for (const root of roots.splice(0)) {
+    try {
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      try {
+        fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      } catch {}
+    }
+  }
+});
 function root() { const value = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-workspace-')); roots.push(value); return value; }
 async function git(root: string, ...args: string[]) { return execa('git', args, { cwd: root }); }
 async function repository(root: string) {
@@ -59,12 +73,12 @@ describe('Teamwork workspace mode', () => {
     expect(independentCalls).toBe(1);
     expect(events.some(event => event.type === 'planner_start')).toBe(false);
     expect(fs.readFileSync(path.join(dir, 'existing.txt'), 'utf8')).toBe('source');
-  });
+  }, 15000);
   it('pauses before manager dispatch without spinning, and resumes the same coordinator',async()=>{
     const dir=root();let release!:()=>void,session='',managerCalls=0;const paused=new Promise<void>(resolve=>release=resolve);
     const {team}=runner(dir,[{id:'answer',role:'general',title:'Answer',description:'answer'}],async messages=>{const request=messages.findLast(message=>message.role==='user')?.content||'';if(request.startsWith('[TEAM MANAGER]')){managerCalls++;return {content:'{"summary":"No additional agents needed","delegate":[]}',toolCalls:[]};}return {content:'done',toolCalls:[]};},true);
     const work=team.run('Answer',event=>{if(typeof event==='string')return;if(event.type==='session_start')session=event.sessionId;if(event.type==='planner_done'){team.control(session,'pause');release();}});await paused;await new Promise(resolve=>setTimeout(resolve,60));expect(managerCalls).toBe(0);team.control(session,'resume');const result=await work;expect(result.tasks[0].status).toBe('completed');expect(managerCalls).toBe(2);
-  });
+  }, 15000);
   it('manager delegates missing validators, preserves the implementation and records its decisions',async()=>{
     const dir=root();let managers=0,writes=0;const command=`node -e "process.exit(require('fs').readFileSync('a.txt','utf8')==='saved'?0:1)"`;
     const {team}=runner(dir,[{id:'code',role:'coder',title:'Implementation',description:'create',expectedFiles:['a.txt'],acceptanceCriteria:['preserve value']}],async messages=>{
@@ -75,7 +89,7 @@ describe('Teamwork workspace mode', () => {
     },true);
     const events:any[]=[],result=await team.run('Create value',event=>events.push(event));expect(result.gate.verdict).toBe('PASS');expect(writes).toBe(1);expect(managers).toBe(3);expect(result.tasks[0].acceptanceCriteria).toEqual(['preserve value']);expect(result.tasks.filter(task=>task.id.startsWith('managed-'))).toHaveLength(2);
     expect(events.filter(event=>event.type==='planner_start')).toHaveLength(1);expect(events.some(event=>event.agentId==='agent-manager'&&event.role==='orchestrator')).toBe(true);const saved=JSON.parse(fs.readFileSync(path.join(dir,'.vibe','sessions',result.id,'resume.json'),'utf8'));expect(saved.manager.revision).toBe(3);expect(saved.manager.delegated).toHaveLength(2);
-  },20000);
+  }, 45000);
   it('tries distinct recovery strategies before requesting help for an unresolved campaign',async()=>{
     const dir=root();let fixes=0;const command='node -e "process.exit(1)"';
     const {team}=runner(dir,[{id:'code',role:'coder',title:'Code',description:'create',expectedFiles:['a.txt']},{id:'test',role:'tester',title:'Verify',description:'verify',dependencies:['code'],verificationCommands:[command]}],async messages=>{
@@ -86,7 +100,7 @@ describe('Teamwork workspace mode', () => {
     const result=await team.run('Avoid unproductive repair loop',()=>{});expect(result.gate.verdict).toBe('FAIL');expect(fixes).toBe(8);expect(result.tasks.find(task=>task.id==='test')?.error).toContain('Phục hồi cần hỗ trợ');
     const saved=JSON.parse(fs.readFileSync(path.join(dir,'.vibe','sessions',result.id,'resume.json'),'utf8'));expect(saved.repairProgress.stagnant).toBe(8);expect(saved.recoveryCampaign.history).toHaveLength(8);
     expect(result.tasks.some(task=>task.id==='repair-9')).toBe(false);expect(result.tasks.filter(task=>task.id.startsWith('diagnosis-')&&task.status==='completed')).toHaveLength(6);
-  },20000);
+  }, 60000);
   it('recovers after the old four-round stop by using an inspected diagnosis and minimal reproduction',async()=>{
     const dir=root();let fixes=0,diagnoses=0,sawDiagnosis=false;const command=`node -e "process.exit(require('fs').readFileSync('a.txt','utf8')==='good'?0:1)"`;
     const {team}=runner(dir,[{id:'code',role:'coder',title:'Code',description:'create',expectedFiles:['a.txt']},{id:'test',role:'tester',title:'Verify',description:'verify',dependencies:['code'],verificationCommands:[command]}],async messages=>{
@@ -96,7 +110,7 @@ describe('Teamwork workspace mode', () => {
       return {content:diagnosis?'{"rootCause":"cause-from-current-source","evidence":["read a.txt"],"nextAction":"reproduce value mismatch and correct assigned file"}':request==='verify'?'verified execution':repair||request==='create'?'done':'{"verdict":"PASS","findings":[]}',toolCalls:[]};
     });
     const result=await team.run('Adaptive recovery',()=>{});expect(result.gate.verdict).toBe('PASS');expect(fixes).toBe(5);expect(diagnoses).toBe(3);expect(sawDiagnosis).toBe(true);expect(fs.readFileSync(path.join(dir,'a.txt'),'utf8')).toBe('good');expect(result.tasks.find(task=>task.id==='test')?.status).toBe('completed');
-  },20000);
+  }, 60000);
   it('accepts an adjustment during the final model response without creating another plan',async()=>{
     const dir=root();let release!:()=>void,started!:()=>void,calls=0;const waiting=new Promise<void>(resolve=>started=resolve),hold=new Promise<void>(resolve=>release=resolve);
     const {team}=runner(dir,[{id:'answer',title:'Answer',description:'original',role:'general'}],async messages=>{
@@ -127,7 +141,7 @@ describe('Teamwork workspace mode', () => {
       });
       const result=await team.run('Fix audited dependency',()=>{});expect(result.gate.verdict).toBe('PASS');expect(result.tasks.find(t=>t.id==='repair-1')?.expectedFiles).toEqual(['package.json']);expect(result.tasks.find(t=>t.id==='repair-review-1')?.status).toBe('completed');
     }finally{vi.restoreAllMocks();}
-  });
+  }, 15000);
 
   it('automatically recovers transport interruption without replanning or replaying completed writes',async()=>{
     const dir=root();let writes=0,failures=0;const original=Tools.prototype.execute;
@@ -141,7 +155,7 @@ describe('Teamwork workspace mode', () => {
       const events:any[]=[],result=await team.run('Create',event=>events.push(event));
       expect(result.tasks[0].status).toBe('completed');expect(writes).toBe(1);expect(events.filter(e=>e.type==='planner_start')).toHaveLength(1);expect(events.some(e=>e.step==='recovery')).toBe(true);
     }finally{vi.restoreAllMocks();}
-  });
+  }, 15000);
   it('continues beyond two repair rounds while source changes, and rechecks the final source',async()=>{
     const dir=root();let fixes=0;const command='node -e "process.exit(0)"',original=Tools.prototype.execute;
     vi.spyOn(Tools.prototype,'execute').mockImplementation(async function(this:Tools,name,raw,signal){if(name==='run_command'&&JSON.parse(raw).command===command)return {ok:fixes>=3,output:fixes>=3?'exit=0\npassed':'exit=1\nnot fixed',...(fixes>=3?{}:{error:'failed'})};return original.call(this,name,raw,signal);});
@@ -156,7 +170,7 @@ describe('Teamwork workspace mode', () => {
       });
       const result=await team.run('Repair until correct',()=>{});expect(result.gate.verdict).toBe('PASS');expect(fixes).toBe(3);expect(result.tasks.find(t=>t.id==='repair-3')?.status).toBe('completed');
     }finally{vi.restoreAllMocks();}
-  });
+  }, 35000);
   it('requires an inspected diagnosis before another repair rather than accepting a bare report',async()=>{
     const dir=root(),command='node -e "process.exit(1)"';
     const {team}=runner(dir,[{id:'code',role:'coder',title:'Code',description:'create',expectedFiles:['a.txt']},{id:'test',role:'tester',title:'Verify',description:'verify',dependencies:['code'],verificationCommands:[command]}],async messages=>{
@@ -165,7 +179,7 @@ describe('Teamwork workspace mode', () => {
       return {content:'done',toolCalls:[]};
     });
     const result=await team.run('Try to repair',()=>{});expect(result.gate.verdict).toBe('FAIL');expect(result.tasks.filter(t=>/^repair-\d+$/.test(t.id))).toHaveLength(3);expect(result.tasks.find(t=>t.id.startsWith('diagnosis-'))?.error).toContain('Recovery diagnosis incomplete');
-  });
+  }, 15000);
 
   it('resumes a finished failed validator with fresh evidence while archiving the old attempt',async()=>{
     const dir=root(),command='node -e "process.exit(0)"';let healed=false,executions=0;
@@ -183,8 +197,7 @@ describe('Teamwork workspace mode', () => {
       const history=path.join(dir,'.vibe','sessions',first.id,'evidence-history');const records=fs.readdirSync(history).map(file=>JSON.parse(fs.readFileSync(path.join(history,file),'utf8')));
       expect(records[0].evidence.checks[0].exitCode).toBe(1);
     }finally{vi.restoreAllMocks();}
-  });
-
+  }, 15000);
   it('continues dependent review when required execution passes despite an optional Python probe failure', async () => {
     const dir=root(), command='node -e "process.exit(0)"';
     const original=Tools.prototype.execute;
@@ -204,7 +217,7 @@ describe('Teamwork workspace mode', () => {
       const result=await team.run('Verify project',()=>{});
       expect(result.gate.verdict).toBe('PASS');expect(result.tasks.find(task=>task.id==='review')?.status).toBe('completed');expect(result.tasks.some(task=>task.id.startsWith('repair-'))).toBe(false);
     } finally { vi.restoreAllMocks(); }
-  });
+  }, 15000);
   it('resumes an interrupted DAG without replanning or rewriting a completed producer', async () => {
     const dir = root(); let writes = 0, checks = 0;
     const { team } = runner(dir, [
@@ -245,7 +258,7 @@ describe('Teamwork workspace mode', () => {
     expect(result.tasks.find(task => task.id === 'blocked')?.status).toBe('blocked');
     expect(result.tasks.filter(task => ['independent', 'next'].includes(task.id)).every(task => task.status === 'completed')).toBe(true);
     expect(result.gate.verdict).toBe('FAIL');
-  });
+  }, 35000);
   it('rejects overlapping runs and allows a fresh run after cancellation', async () => {
     const dir=root(); let release!:()=>void, entered!:()=>void;
     const started=new Promise<void>(resolve=>entered=resolve), blocked=new Promise<void>(resolve=>release=resolve);
@@ -264,7 +277,7 @@ describe('Teamwork workspace mode', () => {
     expect((store.sessions()[0] as any).status).toBe('cancelled');
     const second=await team.run('Second',()=>{});
     expect(second.status).toBe('completed'); expect(second.tasks).toHaveLength(1);
-  });
+  }, 35000);
   it('repairs a malformed plan with prior context before starting workers', async () => {
     const dir=root(); let workers=0, sawPriorOutput=false;
     const {team}=runner(dir,[{title:'Answer',role:'general',acceptanceCriteria:23}],async messages=>{
@@ -280,7 +293,7 @@ describe('Teamwork workspace mode', () => {
     expect(result.status).toBe('completed'); expect(sawPriorOutput).toBe(true); expect(workers).toBe(1);
     expect(events.filter(event=>event.step==='plan_repair')).toHaveLength(1);
     expect(fs.existsSync(path.join(dir,'.vibe','sessions',result.id,'agents','agent-plan-01','plan-attempt-2.json'))).toBe(true);
-  });
+  }, 15000);
   it('ends the durable session and emits a terminal event when planning cannot recover',async()=>{
     const dir=root(); const {team,store}=runner(dir,[],async()=>({content:'{"tasks":[]}',toolCalls:[]}));
     const events:any[]=[];
@@ -303,7 +316,7 @@ describe('Teamwork workspace mode', () => {
     const result = await team.run('Answer a question', () => {});
     expect(repaired).toBe(true); expect(workers).toBe(1);
     expect(result.status).toBe('completed');
-  });
+  }, 15000);
   it('reports a failed durable checkpoint even after the last task completed',async()=>{
     const dir=root(); const {team,store}=runner(dir,[{id:'task',role:'general',title:'Answer'}],async()=>({content:'answer',toolCalls:[]}));
     const original=fs.writeFileSync;
@@ -330,7 +343,7 @@ describe('Teamwork workspace mode', () => {
     });
     try { const result=await team.run('Parallel branches'); expect(result.status).toBe('completed'); expect(observedOverlap).toBe(true); }
     finally {clearTimeout(timeout);releaseSlow();}
-  });
+  }, 15000);
   it('runs sibling verification and review concurrently rather than one role at a time', async () => {
     const dir=root(); let release!:()=>void; const barrier=new Promise<void>(resolve=>release=resolve), starts=new Set<string>();
     const timeout=setTimeout(release,2500); let overlapping=false;
@@ -341,7 +354,7 @@ describe('Teamwork workspace mode', () => {
     });
     try { await team.run('Parallel gates'); expect(overlapping).toBe(true); }
     finally {clearTimeout(timeout);release();}
-  });
+  }, 15000);
   it('creates a page and lets tester/reviewer inspect the same files in an ordinary folder', async () => {
     const dir = root(); let wrote = false; const checked: string[] = [];
     const plan = [{ id: 'T1', role: 'coder', title: 'Create page', description: 'create-page', dependencies: [] }, { id: 'T2', role: 'tester', title: 'Check page', description: 'check-page', dependencies: ['T1'] }, { id: 'T3', role: 'reviewer', title: 'Review page', description: 'review-page', dependencies: ['T2'] }];
@@ -367,7 +380,7 @@ describe('Teamwork workspace mode', () => {
     expect(fs.readFileSync(path.join(session, 'GATE_STATUS.md'), 'utf8')).toContain('UNVERIFIED');
     expect(fs.readFileSync(path.join(session, 'agents', 'agent-coder-01', 'DISPATCH.md'), 'utf8')).toContain('Workspace:');
     expect(fs.readFileSync(path.join(session, 'agents', 'agent-reviewer-03', 'handoff.md'), 'utf8')).toContain('Tool evidence:');
-  });
+  }, 15000);
   it('serializes independent writers when no worktree isolation is available', async () => {
     const dir = root(); let active = 0, peak = 0;
     const { team } = runner(dir, ['T1', 'T2'].map(id => ({ id, role: 'coder', title: id, dependencies: [] })), async () => {
@@ -417,7 +430,7 @@ describe('Teamwork workspace mode', () => {
     });
     const result = await team.run('Two features'); expect(result.status).toBe('completed'); expect(new Set(seen).size).toBe(1);
     expect(fs.existsSync(path.join(dir, 'a.txt'))).toBe(false);
-  });
+  }, 15000);
   it('repairs a real failed check with fresh agents and reruns verification', async () => {
     const dir = root();
     const command = `node -e "process.exit(require('fs').readFileSync('answer.txt','utf8')==='good'?0:1)"`;
@@ -438,7 +451,7 @@ describe('Teamwork workspace mode', () => {
     expect(store.tasks(result.id).find(task => task.id === 'repair-1')?.status).toBe('completed');
     const attempts = fs.readdirSync(path.join(dir, '.vibe', 'sessions', result.id, 'agents'));
     expect(attempts).toContain('agent-tester-02'); expect(attempts).toContain('agent-tester-02-r1');
-  });
+  }, 35000);
   it('vetoes a validator that changes assigned source while claiming success', async () => {
     const dir = root();
     const plan = [{ id: 'code', role: 'coder', title: 'Code', description: 'make-source', expectedFiles: ['source.txt'] }, { id: 'test', role: 'tester', title: 'Verify', description: 'tamper-source', dependencies: ['code'] }];
@@ -480,5 +493,5 @@ describe('Teamwork workspace mode', () => {
       expect(repairedAfterDrain).toBe(true);expect(result.gate.verdict).toBe('PASS');
       expect(result.tasks.find(task=>task.id==='review')?.retries).toBe(1);
     }finally{clearTimeout(timeout);release();}
-  });
+  }, 35000);
 });

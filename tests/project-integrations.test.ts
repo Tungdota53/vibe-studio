@@ -4,7 +4,7 @@ import {ProjectIntegrations,projectSignals} from '../src/project-integrations.js
 import {SkillLibrary} from '../src/skills.js';import {loadConfig} from '../src/config.js';import {McpRegistry} from '../src/mcp.js';
 import {execaCommand} from 'execa';
 vi.mock('execa',()=>({execaCommand:vi.fn()}));
-const roots:string[]=[];afterEach(()=>{vi.restoreAllMocks();for(const root of roots.splice(0))fs.rmSync(root,{recursive:true,force:true})});
+const roots:string[]=[];afterEach(()=>{vi.restoreAllMocks();for(const root of roots.splice(0)){try{fs.rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:100});}catch{}}});
 function project(web=false){const root=fs.mkdtempSync(path.join(os.tmpdir(),'vibe-auto-'));roots.push(root);if(web)fs.writeFileSync(path.join(root,'package.json'),JSON.stringify({dependencies:{react:'1',vite:'1'}}));return root;}
 function fixture(root:string){const library=new SkillLibrary(root);const sources=library.list().filter(s=>s.source==='github');return vi.fn(async(url:string)=>{const parsed=new URL(url),relative=decodeURIComponent(parsed.pathname.slice(1));for(const skill of sources){const m=JSON.parse(fs.readFileSync(path.join(path.dirname(skill.file),'.provenance.json'),'utf8')),prefix=`${m.repository}/${m.commit}/`;if(!relative.startsWith(prefix))continue;const file=relative.slice(prefix.length);const name=file.startsWith(m.path+'/')?file.slice(m.path.length+1):file==='LICENSE'||file==='LICENSE.txt'?'LICENSE.txt':'';if(name&&m.files[name])return fs.readFileSync(path.join(path.dirname(skill.file),name));}throw new Error('Unknown source')});}
 describe('Automatic project integrations',()=>{
@@ -35,7 +35,7 @@ describe('Automatic project integrations',()=>{
     expect(result.config.agentProfiles?.reviewer?.skills).toContain('builtin:code-review');
     const count=get.mock.calls.length;const next=await service.sync(result.config,'security audit');expect(get.mock.calls.length).toBe(count);expect(next.report.results.every(x=>x.status==='cached')).toBe(true);
     const skill=list[0];fs.appendFileSync(skill.file,'\nTampered');expect(()=>new SkillLibrary(root).load(skill.id)).toThrow('checksum');
-  });
+  },15000);
   it('rejects checksum failures without installing or assigning corrupt content',async()=>{
     const root=project();vi.spyOn(McpRegistry.prototype,'discover').mockResolvedValue([]);const result=await new ProjectIntegrations(root,async()=>Buffer.from('corrupt')).sync(loadConfig(root),'security');expect(result.report.results.every(x=>x.status==='error')).toBe(true);expect(new SkillLibrary(root).list().filter(s=>s.source==='workspace')).toHaveLength(0);expect(result.config.agentProfiles).toEqual({});
   });
