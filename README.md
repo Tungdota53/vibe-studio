@@ -1,156 +1,799 @@
 # Vibe Studio 1.0
 
-Không gian làm việc AI trên Windows để trò chuyện với dự án, viết mã và phối hợp nhiều agent. Vibe Studio kết hợp chat, quản lý ngữ cảnh, công cụ lập trình và sơ đồ tác vụ trong một ứng dụng desktop.
+**AI workspace trên Windows dành cho lập trình, quản lý dự án và phối hợp nhiều agent.**
 
-[Tải Vibe Studio 1.0](https://github.com/Tungdota53/cutty-studio/releases/tag/v1.0.0) · [Mã nguồn](https://github.com/Tungdota53/cutty-studio)
+Vibe Studio đưa chat AI, chỉnh sửa mã nguồn, quản lý context, kiểm thử, Git, MCP và điều phối multi-agent vào cùng một ứng dụng desktop.
 
-![Giao diện theo dõi agent](docs/agent-map-preview.png)
+> Làm việc với cả dự án — không chỉ với một ô chat.
 
-## Tính năng
+[**Tải Vibe Studio 1.0**](https://github.com/Tungdota53/cutty-studio/releases/tag/v1.0.0) · [**Mã nguồn**](https://github.com/Tungdota53/cutty-studio)
 
-### Chat và làm việc với dự án
+![Vibe Studio Agent Map](docs/agent-map-preview.png)
 
-- Chọn thư mục dự án, tạo chat và mở lại lịch sử đã lưu.
-- Nhận phản hồi trực tiếp khi AI đang trả lời; dừng tác vụ ngay trên giao diện.
-- Theo dõi tiến độ ngay trong chat: công cụ đang chạy, bước đã xong và lỗi cần xử lý; mở lại phiên để xem các mốc đã lưu.
-- Trong phiên Teamwork cũ, gõ “tiếp tục” để khôi phục kế hoạch và checkpoint, giữ kết quả hợp lệ và chạy phần còn lại. App không gọi planner tạo kế hoạch mới; nếu chưa chọn phiên hoặc nguồn đã thay đổi, app báo nguyên nhân cần xử lý.
-- Phục hồi nhận diện các vòng sửa hoàn tất kế tiếp trên cùng nhóm tệp: dấu vết vòng sửa mới thay thế vòng cũ để xác minh nguồn, vẫn giữ lịch sử. Thay đổi ngoài phiên bị chặn; bằng chứng kiểm tra cũ được chạy lại khi nguồn đã được sửa hợp lệ.
-- Sơ đồ phân biệt heartbeat và tiến độ thực tế, hiển thị thời điểm cập nhật gần nhất và cảnh báo khi chưa có kết quả mới sau 90 giây. Lệnh shell quá 2 phút, bộ kiểm thử quá 5 phút hoặc thao tác Git quá 30 giây sẽ dừng cây tiến trình được app khởi tạo; giữ checkpoint để kiểm tra thay đổi trước khi thử lại.
-- Câu trả lời có tiêu đề, danh sách, bảng, màu code và hiệu ứng streaming; sao chép toàn bộ câu trả lời hoặc từng khối code.
-- Đọc, tìm kiếm và chỉnh sửa tệp, xem Git diff, chạy lệnh và kiểm thử theo quyền của agent.
-- Kết nối nhà cung cấp API tương thích OpenAI bằng URL, khóa API và tên model.
-- Chọn chế độ Hỏi, Lập kế hoạch, Triển khai, Kiểm chứng hoặc Chẩn đoán/sửa; runtime áp dụng quyền theo chế độ.
+---
 
-### Trung tâm điều hành phiên
+## ✨ Tổng quan
 
-- Bổ sung yêu cầu trong lúc Teamwork chạy, ưu tiên task chưa chạy và tạm ngừng giao việc; giữ kế hoạch và kết quả đã hoàn tất.
-- Xem lỗi gốc, lần tự phục hồi, kiểm tra thất bại và task đang chờ kết quả.
-- Lưu ghi nhớ cùng hash tệp nguồn; loại khỏi context khi nguồn đổi. Học các bản sửa đã nghiệm thu với bằng chứng kiểm tra thực thi.
-- Xem timeline agent/model/lệnh/kết quả và diff theo checkpoint; xuất hồ sơ bàn giao Markdown/JSON.
-- Bật worktree cách ly cho dự án Git sạch. Tích hợp tệp đã nghiệm thu PASS sau khi kiểm tra xung đột với thay đổi người dùng, có checkpoint hoàn tác.
-- So sánh nguồn trước công cụ ghi của worker, giữ khóa tệp theo task và từ chối tên tệp Windows mơ hồ.
-- Hiển thị phạm vi kế hoạch; ước lượng token/thời gian từ telemetry trước, chi phí từ đơn giá được cấu hình.
-- Xem nguồn, commit, giấy phép, integrity và runtime cần thiết của skill trong Công cụ phiên.
+Vibe Studio được thiết kế cho các workflow phát triển phần mềm có AI tham gia trực tiếp vào dự án.
 
-[Quy trình và giới hạn của trung tâm điều hành](docs/operations-center.md).
+Bạn có thể:
 
-### Teamwork chạy song song
+- Mở một thư mục dự án và trò chuyện trực tiếp với codebase.
+- Cho AI đọc, tìm kiếm và chỉnh sửa tệp.
+- Chạy lệnh, test và kiểm tra Git diff.
+- Phân công nhiều agent làm việc song song.
+- Theo dõi toàn bộ tiến trình bằng sơ đồ trực quan.
+- Khôi phục phiên làm việc từ checkpoint.
+- Kết nối nhiều model và nhiều MCP server.
+- Quản lý context, token, ngân sách và quyền thực thi.
+- Xem preview web ngay cạnh cửa sổ chat.
 
-- Phân công công việc cho các agent lập kế hoạch, lập trình, kiểm thử, rà soát và nghiệm thu.
-- Agent có nhiệm vụ độc lập chạy đồng thời; số agent đang hoạt động có thể cấu hình từ 1 đến 16.
-- Mỗi tác vụ có người phụ trách, tệp được giao, tiêu chí nghiệm thu và quan hệ phụ thuộc.
-- Nhánh độc lập tiếp tục khi nhánh khác lỗi; tác vụ cần kết quả còn thiếu hiển thị rõ lý do bị chặn.
-- Phục hồi thích ứng lưu cách sửa đã thất bại và đổi chiến lược: sửa trực tiếp → chẩn đoán nguyên nhân → tái hiện tối thiểu → triển khai thay thế. Chẩn đoán chỉ đọc cần bằng chứng kiểm tra nguồn thật trước khi truyền sang coder. Trạng thái chiến lược được giữ khi tiếp tục phiên.
-- Agent vẫn làm việc song song; lệnh shell/test dùng chung workspace được xếp hàng để tránh nhiều build ghi đè `.next` hoặc output của nhau. Khi chờ, app không gọi model và sơ đồ hiển thị lý do.
-- Lần chạy mới nhất của cùng lệnh quyết định kết quả; lịch sử lỗi cũ được giữ. Tìm kiếm không có kết quả và dò runtime tùy chọn không bị coi là kiểm thử thất bại; lệnh bắt buộc và audit lỗ hổng thật vẫn chặn.
-- Pipeline tự thử lại lỗi kết nối/stream tạm thời từ checkpoint, giữ kết quả công cụ đã chạy. Lỗi kiểm thử được gom để agent sửa và chạy lại các bước liên quan; không còn trần hai vòng nếu mã nguồn còn tiến triển. Lỗi lặp chuyển sang chiến lược phục hồi khác; chỉ yêu cầu hỗ trợ khi các hướng được phép đều thất bại hoặc thiếu bằng chứng/phạm vi sửa. Audit dependency có thể tạo tác vụ sửa package/lock và reviewer độc lập khi kế hoạch ban đầu chỉ gồm kiểm tra. Ngân sách, lỗi quyền truy cập, xung đột nguồn và thao tác chưa rõ kết quả vẫn được bảo vệ. Công cụ `write_report` cho phép lưu JSON trong `test-results/` hoặc `reports/`, có checkpoint và không cấp quyền sửa mã nguồn cho tester/reviewer. Kết quả audit có lỗ hổng chưa xử lý vẫn chặn nghiệm thu.
-- Nghiệm thu phân biệt dò phiên bản/import môi trường và thao tác lưu báo cáo với kiểm thử bắt buộc. Agent dùng runtime và test script của dự án; Node Playwright không yêu cầu Python. Lịch sử thử nghiệm của coder được giữ để tra cứu; kết luận dựa vào lệnh bắt buộc và tester/reviewer kiểm tra nguồn cuối. Timeout và kiểm thử thật thất bại vẫn chặn, kèm tên lệnh và nguyên nhân.
+---
 
-### Sơ đồ agent trực tiếp
+# 💬 Chat với dự án
 
-- Hiển thị agent, model đang gọi, nhiệm vụ, bước hiện tại và trạng thái chạy/chờ/hoàn tất/lỗi.
-- Xem danh sách agent hoạt động hoặc đồ thị phụ thuộc giữa các tác vụ.
-- Bấm tác vụ để xem skill, tệp được giao, kết quả và nhật ký hoạt động.
-- Phóng to, thu nhỏ, vừa khung và theo dõi tác vụ đang chạy.
-- Giao diện tối với chuyển động và hỗ trợ giảm chuyển động theo hệ điều hành.
+Không cần copy từng đoạn code vào chatbot.
 
-### Thiết lập agent và skill
+Chọn thư mục dự án, tạo phiên làm việc và để Vibe Studio sử dụng trực tiếp các tệp liên quan trong workspace.
 
-- Chọn model, hướng dẫn, vai trò và skill riêng cho từng agent; bật hoặc tắt agent theo dự án.
-- Có 7 skill vai trò và 38 gói skill bổ sung cho lập trình, UI/UX, bảo mật, kiểm thử, nghiên cứu và phối hợp tác vụ.
-- Tự đề xuất skill theo vai trò/chủ đề hoặc chọn thủ công.
-- Kiểm tra nguồn, giấy phép và tính toàn vẹn của các gói skill đóng sẵn trước khi nạp.
-- Đọc tài liệu web HTTPS công khai bằng công cụ nghiên cứu tích hợp.
+### Hỗ trợ
 
-### Ngữ cảnh và phục hồi
+- Tạo chat mới và mở lại lịch sử đã lưu.
+- Streaming phản hồi trực tiếp.
+- Dừng tác vụ ngay khi agent đang chạy.
+- Theo dõi tool call, bước đã hoàn tất và lỗi ngay trong chat.
+- Đọc, tìm kiếm và chỉnh sửa tệp.
+- Xem Git diff.
+- Chạy shell command và test theo quyền của agent.
+- Sao chép toàn bộ câu trả lời hoặc từng code block.
+- Markdown với heading, bảng, danh sách và syntax highlighting.
 
-- Lưu lịch sử, lời gọi công cụ và kết quả theo từng cuộc trò chuyện.
-- Chế độ tự động dùng cửa sổ context do nhà cung cấp công bố; có giới hạn thủ công/dự phòng khi API thiếu metadata.
-- Context dự phòng mặc định **1.000.000 token**, tự nâng cấu hình auto cũ; dùng giới hạn thực tế khi API công bố và giữ cấu hình thủ công. Bảng ngữ cảnh phân biệt cửa sổ hiệu lực, ngân sách đầu vào và phần dành cho đầu ra.
-- Hiển thị dung lượng ước tính, token đầu vào/đầu ra và số lần nén; hỗ trợ nén thủ công.
-- Nén lịch sử cũ khi cần, giữ yêu cầu và tra cứu lại bản ghi gốc của tác vụ.
-- Đặt ngân sách lượt suy luận và lượt công cụ về **0** để không giới hạn số lượt; nút Dừng và kiểm tra lặp không tiến triển vẫn hoạt động.
-- Khi stream bị ngắt, tiếp tục trên cùng model với tối đa hai lần phục hồi; giữ checkpoint và loại bỏ lời gọi công cụ chưa hoàn chỉnh.
-- Trong **Công cụ phiên**, ghim yêu cầu và thêm tệp nguồn vào context; xem nguồn, nhóm lượt và lượng token ước tính. Ghi nhớ được giữ qua các lần nén.
-- Checkpoint tự lưu trước/sau chỉnh sửa tệp; xem diff, chọn tệp hoàn tác và kiểm tra xung đột với thay đổi mới của bạn. Snapshot lệnh có phạm vi và dung lượng giới hạn, hiển thị phần không được lưu.
-- Tiếp tục chat hoặc Teamwork bị gián đoạn từ nhật ký lưu trên máy. Task hoàn tất được giữ khi dấu vết tệp còn đúng; thao tác ghi chưa xác định kết quả được đánh dấu để kiểm tra.
-- Đặt ngân sách token và USD cho mỗi agent/task, xem thời gian, số lượt gọi và cảnh báo từ 80%. Giá tính theo đơn giá bạn nhập; chưa có giá được hiển thị rõ. Giới hạn được kiểm tra trước lượt gọi tiếp theo.
+### Chế độ làm việc
 
-### Preview web cạnh chat
+Mỗi phiên có thể chạy theo một trong các chế độ:
 
-- Mở tệp HTML trong workspace để xem cùng CSS/JavaScript trên bảng preview riêng; tự tải lại khi tệp web thay đổi.
-- Hiển thị console, lỗi JavaScript và promise bị từ chối; hỗ trợ tải lại thủ công.
-- Kiểm tra bố cục 320px, phát hiện ứng viên tràn ngang/ảnh lỗi/thiếu nhãn và chụp vùng preview trong bản EXE. Quan sát lưu cùng hash HTML, cần bộ test browser để nghiệm thu luồng người dùng.
-- Preview chạy trong iframe cô lập, không có quyền truy cập backend và chặn tệp bí mật/nội bộ. Preview hiện hỗ trợ dự án web tĩnh; ứng dụng cần dev server phải build ra HTML trước.
+- **Hỏi**
+- **Lập kế hoạch**
+- **Triển khai**
+- **Kiểm chứng**
+- **Chẩn đoán / sửa lỗi**
 
-### Kết nối nhiều MCP
+Runtime tự giới hạn quyền của agent dựa trên chế độ hiện tại.
 
-- Mục **Tích hợp dự án** nhận diện công nghệ từ manifest, đề xuất skill/MCP và tự thiết lập trước khi agent làm việc. Có thể bật/tắt, thiết lập ngay hoặc dừng tải.
-- Tải skill từ danh mục nguồn GitHub đã kiểm tra, cố định commit, xác minh checksum và giấy phép; tải cả tài nguyên và gán cho vai phù hợp. Cache đã xác minh được tái sử dụng.
-- Dự án web được chọn Playwright MCP; dự án có thư viện được chọn Context7. Playwright cài riêng trong `.vibe/integrations`, cố định phiên bản npm và bỏ install scripts; cần npm và trình duyệt trên máy.
-- Hiển thị kết quả tải và số công cụ thực sự kết nối. Server thiếu khóa, thiếu runtime hoặc lỗi mạng được báo riêng và không chặn agent dùng công cụ hiện có. Không tự thu thập mọi kho tùy ý hay gọi nguồn đó là có chứng chỉ.
+---
 
-- Thêm nhiều server trong mục **MCP**, hỗ trợ Streamable HTTP và chương trình Stdio chạy trên máy.
-- Xem trạng thái kết nối và số công cụ của từng server; bật/tắt hoặc xóa từng cấu hình.
-- Agent tự thấy và gọi các công cụ được phép, với tên riêng theo server để tránh trùng.
-- Các agent chạy song song có thể dùng nhiều server đồng thời; lỗi của một kết nối được giữ riêng.
-- Công cụ MCP được lọc theo vai trò và tính chất chỉ đọc. Tác vụ ghi không tự được gửi lại khi lỗi kết nối.
-- Chỉ nạp nhóm công cụ phù hợp nhiệm vụ trong ngân sách schema; agent tìm và kích hoạt thêm khi cần. Tra cứu công cụ từ **Công cụ phiên**.
+# 🤝 Teamwork — Multi-agent thực sự
 
-## Tải và bắt đầu
+Teamwork cho phép chia một yêu cầu lớn thành nhiều tác vụ và giao cho nhiều agent xử lý đồng thời.
 
-Mở [trang tải Vibe Studio 1.0](https://github.com/Tungdota53/cutty-studio/releases/tag/v1.0.0), chọn bản dành cho **Windows x64**:
+Agent có thể đảm nhiệm các vai trò như:
 
-| Tệp | Cách dùng |
-| --- | --- |
-| `Vibe-Studio-1.0.0-x64-Setup.exe` | Cài đặt ứng dụng và tạo shortcut |
+- Planner
+- Coder
+- Tester
+- Reviewer
+- Researcher
+- Validator
+
+Số agent hoạt động đồng thời có thể cấu hình từ **1 đến 16**.
+
+Mỗi task có:
+
+- người phụ trách;
+- phạm vi tệp;
+- dependency;
+- tiêu chí nghiệm thu;
+- trạng thái thực thi;
+- kết quả và bằng chứng kiểm tra.
+
+Các nhánh độc lập vẫn tiếp tục chạy ngay cả khi một nhánh khác thất bại.
+
+Nếu task đang chờ đầu ra của task khác, Vibe Studio hiển thị rõ nguyên nhân thay vì để agent chạy vô ích.
+
+---
+
+## ♻️ Phục hồi Teamwork
+
+Một phiên bị gián đoạn không nhất thiết phải bắt đầu lại từ đầu.
+
+Trong phiên Teamwork cũ, chỉ cần nhập:
+
+```text
+tiếp tục
+```
+
+Vibe Studio sẽ cố gắng khôi phục:
+
+- kế hoạch;
+- checkpoint;
+- task đã hoàn tất;
+- kết quả hợp lệ;
+- trạng thái chiến lược phục hồi.
+
+Planner không tự tạo lại kế hoạch mới nếu kế hoạch cũ vẫn hợp lệ.
+
+Nếu nguồn đã thay đổi hoặc chưa chọn đúng phiên, ứng dụng sẽ giải thích nguyên nhân thay vì tiếp tục trên trạng thái không an toàn.
+
+---
+
+# 🧠 Phục hồi thích ứng
+
+Khi một hướng sửa thất bại, Vibe Studio không chỉ lặp lại cùng một phương án.
+
+Pipeline có thể chuyển chiến lược theo chuỗi:
+
+```text
+Sửa trực tiếp
+      ↓
+Chẩn đoán nguyên nhân
+      ↓
+Tái hiện tối thiểu
+      ↓
+Triển khai phương án thay thế
+```
+
+Các cách sửa đã thất bại được lưu lại để agent tránh lặp lại cùng một chiến lược.
+
+Nếu mã nguồn vẫn tiếp tục có tiến triển, pipeline có thể tiếp tục sửa và kiểm tra thay vì dừng ở một số vòng retry cố định.
+
+Chỉ yêu cầu người dùng can thiệp khi:
+
+- các hướng xử lý được phép đều thất bại;
+- thiếu bằng chứng cần thiết;
+- thiếu quyền;
+- có xung đột nguồn;
+- hoặc trạng thái thao tác ghi không thể xác định an toàn.
+
+---
+
+# 🛰 Trung tâm điều hành phiên
+
+Operations Center giúp theo dõi toàn bộ vòng đời của một phiên Teamwork.
+
+Bạn có thể:
+
+- bổ sung yêu cầu khi Teamwork vẫn đang chạy;
+- ưu tiên task chưa bắt đầu;
+- tạm dừng giao task mới;
+- xem lỗi gốc và các lần tự phục hồi;
+- xem task đang chờ dependency;
+- kiểm tra validation thất bại;
+- xem timeline agent, model, lệnh và kết quả;
+- xem diff tại từng checkpoint;
+- xuất hồ sơ bàn giao dạng Markdown hoặc JSON.
+
+Xem thêm:
+
+[**Quy trình và giới hạn của Trung tâm điều hành**](docs/operations-center.md)
+
+---
+
+# 🗺 Agent Map trực tiếp
+
+Vibe Studio cung cấp sơ đồ trực quan để theo dõi nhóm agent theo thời gian thực.
+
+Bạn có thể xem:
+
+- agent nào đang hoạt động;
+- model đang được gọi;
+- nhiệm vụ đang xử lý;
+- bước hiện tại;
+- dependency giữa các task;
+- trạng thái chạy / chờ / hoàn tất / lỗi;
+- thời điểm có tiến độ thực tế gần nhất.
+
+Có thể chuyển giữa:
+
+- **Danh sách agent**
+- **Đồ thị dependency**
+
+Bấm vào một task để xem:
+
+- skill;
+- phạm vi tệp;
+- kết quả;
+- lịch sử hoạt động;
+- bằng chứng kiểm tra.
+
+Sơ đồ hỗ trợ:
+
+- zoom;
+- thu nhỏ;
+- fit-to-screen;
+- theo dõi task đang chạy;
+- dark UI;
+- chế độ giảm chuyển động theo thiết lập hệ điều hành.
+
+---
+
+## Heartbeat ≠ tiến độ
+
+Vibe Studio phân biệt rõ:
+
+- agent vẫn còn sống;
+- agent thực sự tạo ra kết quả mới.
+
+Nếu không có tiến độ thực tế trong **90 giây**, giao diện sẽ hiển thị cảnh báo.
+
+Một số thao tác cũng có giới hạn an toàn:
+
+| Tác vụ | Giới hạn |
+|---|---:|
+| Shell command | 2 phút |
+| Test suite | 5 phút |
+| Git operation | 30 giây |
+
+Khi timeout, cây tiến trình do Vibe Studio tạo sẽ được dừng và checkpoint vẫn được giữ lại để kiểm tra trước khi thử tiếp.
+
+---
+
+# 🧪 Kiểm thử và nghiệm thu
+
+Vibe Studio tách biệt:
+
+- kiểm tra runtime;
+- kiểm tra import;
+- lệnh test bắt buộc;
+- thao tác lưu báo cáo;
+- kiểm chứng nguồn cuối.
+
+Một số nguyên tắc:
+
+- Kết quả của lần chạy mới nhất của cùng một lệnh được ưu tiên.
+- Lịch sử lỗi cũ vẫn được giữ để tra cứu.
+- Search không có kết quả không tự bị coi là test fail.
+- Runtime tùy chọn không tồn tại không tự chặn nghiệm thu.
+- Test bắt buộc thất bại vẫn chặn.
+- Timeout vẫn chặn.
+- Dependency audit phát hiện lỗ hổng chưa xử lý vẫn chặn.
+- Reviewer và tester phải kiểm tra trên nguồn cuối cùng.
+
+Node Playwright không yêu cầu Python.
+
+Tester/reviewer có thể sử dụng:
+
+```text
+write_report
+```
+
+để lưu báo cáo JSON trong:
+
+```text
+test-results/
+reports/
+```
+
+mà không cần quyền chỉnh sửa mã nguồn.
+
+---
+
+# 🔐 Kiểm soát thay đổi và checkpoint
+
+Vibe Studio lưu checkpoint trước và sau các thao tác chỉnh sửa.
+
+Bạn có thể:
+
+- xem diff;
+- chọn tệp để hoàn tác;
+- so sánh với thay đổi mới của người dùng;
+- kiểm tra xung đột trước khi restore.
+
+Snapshot của command được giới hạn phạm vi và dung lượng. Nếu dữ liệu bị cắt bớt, giao diện sẽ hiển thị rõ phần không được lưu.
+
+Với tác vụ ghi:
+
+- worker phải kiểm tra nguồn trước khi ghi;
+- file lock được giữ theo task;
+- thay đổi ngoài phiên có thể bị chặn;
+- các tên tệp Windows mơ hồ bị từ chối.
+
+---
+
+# 🌳 Git Worktree cách ly
+
+Với repository Git sạch, Vibe Studio có thể tạo worktree riêng cho agent.
+
+Điều này giúp:
+
+- giảm ảnh hưởng lên workspace chính;
+- cô lập thay đổi;
+- kiểm tra trước khi tích hợp.
+
+Chỉ các tệp đã được nghiệm thu **PASS** mới được đưa vào bước tích hợp.
+
+Trước khi merge lại workspace chính, Vibe Studio kiểm tra:
+
+- xung đột với thay đổi của người dùng;
+- trạng thái nguồn;
+- checkpoint cần thiết để hoàn tác.
+
+---
+
+# 🧩 Agent & Skill
+
+Mỗi agent có thể được cấu hình riêng:
+
+- model;
+- system instruction;
+- vai trò;
+- skill;
+- trạng thái bật / tắt.
+
+Vibe Studio hiện đi kèm:
+
+**7 skill vai trò**  
+**38 gói skill bổ sung**
+
+bao phủ các nhóm:
+
+- lập trình;
+- UI/UX;
+- bảo mật;
+- kiểm thử;
+- nghiên cứu;
+- điều phối tác vụ.
+
+Skill có thể được:
+
+- đề xuất tự động theo vai trò và chủ đề;
+- chọn thủ công;
+- kiểm tra nguồn;
+- kiểm tra license;
+- xác minh integrity trước khi nạp.
+
+Thông tin skill trong **Công cụ phiên** bao gồm:
+
+- nguồn;
+- commit;
+- license;
+- integrity;
+- runtime yêu cầu.
+
+---
+
+# 🔌 Multi-MCP
+
+Vibe Studio hỗ trợ nhiều MCP server trong cùng một dự án.
+
+Các kiểu kết nối:
+
+- **Streamable HTTP**
+- **Stdio chạy cục bộ**
+
+Mỗi server có trạng thái và namespace riêng để tránh xung đột tên tool.
+
+Bạn có thể:
+
+- thêm nhiều server;
+- bật / tắt từng server;
+- xóa cấu hình;
+- xem số tool kết nối thành công;
+- tra cứu tool trong Công cụ phiên.
+
+Các agent song song có thể sử dụng nhiều MCP server cùng lúc.
+
+Lỗi của một server không làm mất trạng thái của các server còn lại.
+
+---
+
+## Tích hợp dự án tự động
+
+Mục **Tích hợp dự án** có thể nhận diện công nghệ thông qua manifest và đề xuất skill/MCP trước khi agent bắt đầu.
+
+Ví dụ:
+
+```text
+Web project       → Playwright MCP
+Library / SDK     → Context7
+```
+
+Playwright được cài riêng tại:
+
+```text
+.vibe/integrations
+```
+
+với:
+
+- phiên bản npm được cố định;
+- install script bị vô hiệu hóa;
+- trạng thái runtime được kiểm tra rõ ràng.
+
+Nếu thiếu API key, runtime hoặc kết nối mạng, ứng dụng báo riêng từng nguyên nhân nhưng vẫn cho agent tiếp tục sử dụng những công cụ còn khả dụng.
+
+---
+
+# 📚 Context Engine
+
+Vibe Studio quản lý context theo khả năng thực tế của model.
+
+Chế độ **Auto** sử dụng context window mà provider công bố.
+
+Nếu API không cung cấp metadata, Vibe Studio sử dụng cấu hình dự phòng.
+
+Context fallback mặc định:
+
+**1.000.000 token**
+
+Các cấu hình Auto cũ được tự nâng lên giá trị mới.
+
+Nếu provider công bố giới hạn thực tế, giá trị đó được ưu tiên.
+
+Cấu hình thủ công của người dùng luôn được giữ.
+
+---
+
+## Theo dõi context
+
+Bảng context phân biệt:
+
+- context window hiệu lực;
+- ngân sách input;
+- vùng dành cho output;
+- token đầu vào;
+- token đầu ra;
+- số lần nén.
+
+Bạn cũng có thể nén context thủ công.
+
+Khi context cần thu gọn, Vibe Studio nén lịch sử cũ nhưng vẫn giữ:
+
+- yêu cầu quan trọng;
+- memory;
+- metadata cần thiết;
+- khả năng truy xuất lại log gốc của task.
+
+---
+
+# 🧷 Session Memory
+
+Trong **Công cụ phiên**, bạn có thể:
+
+- ghim yêu cầu;
+- thêm source file vào context;
+- xem nguồn của context;
+- xem nhóm lượt;
+- xem lượng token ước tính.
+
+Memory có thể được gắn với hash của tệp nguồn.
+
+Nếu nguồn thay đổi, memory không còn hợp lệ sẽ tự bị loại khỏi context.
+
+Những cách sửa đã được nghiệm thu có thể được lưu lại cùng bằng chứng kiểm tra để tái sử dụng chính xác hơn trong các vòng tiếp theo.
+
+---
+
+# 💰 Token, thời gian và ngân sách
+
+Có thể đặt ngân sách riêng cho:
+
+- agent;
+- task.
+
+Các chỉ số gồm:
+
+- token;
+- USD;
+- thời gian;
+- số lượt model;
+- số lượt tool.
+
+Ứng dụng cảnh báo khi đạt khoảng **80% ngân sách**.
+
+Chi phí được tính theo bảng giá bạn nhập.
+
+Nếu chưa cấu hình giá, giao diện hiển thị rõ rằng chi phí chưa thể tính.
+
+Đặt:
+
+```text
+Reasoning budget = 0
+Tool budget      = 0
+```
+
+để bỏ giới hạn số lượt.
+
+Nút **Dừng** và cơ chế phát hiện vòng lặp không tiến triển vẫn luôn hoạt động.
+
+---
+
+# 🌐 Web Preview cạnh chat
+
+Vibe Studio có thể mở trực tiếp tệp HTML trong workspace trên panel preview riêng.
+
+Hỗ trợ:
+
+- HTML;
+- CSS;
+- JavaScript;
+- tự reload khi source thay đổi;
+- reload thủ công;
+- JavaScript console;
+- runtime error;
+- rejected Promise.
+
+Có thể kiểm tra layout ở chiều rộng:
+
+```text
+320px
+```
+
+và phát hiện một số vấn đề như:
+
+- overflow ngang;
+- ảnh lỗi;
+- phần tử thiếu nhãn.
+
+Bản EXE cũng hỗ trợ chụp vùng preview.
+
+> Preview hiện tập trung vào dự án web tĩnh. Ứng dụng yêu cầu dev server cần build thành HTML trước khi preview.
+
+Preview chạy trong iframe cô lập, không có quyền truy cập backend và chặn các tệp nội bộ hoặc nhạy cảm.
+
+---
+
+# 🔍 Kiểm tra dự án cục bộ
+
+Tool:
+
+```text
+inspect_project
+```
+
+có thể khảo sát project mà **không chạy script và không tự cài dependency**.
+
+Nó có thể nhận diện:
+
+- Node;
+- Electron;
+- dependency;
+- dấu vết SHA-256;
+- install hook;
+- ứng viên lỗi cấu hình Electron.
+
+Ba skill tích hợp có thể tự chọn theo vai:
+
+- khảo sát dự án;
+- bằng chứng dependency;
+- rà soát Electron.
+
+Báo cáo luôn phân biệt giữa:
+
+```text
+Static observation
+```
+
+và:
+
+```text
+Verified vulnerability
+```
+
+Nếu chưa có kiểm chứng thực thi, kết quả được giữ ở trạng thái:
+
+```text
+UNVERIFIED
+```
+
+---
+
+# 🔄 Khôi phục khi stream bị ngắt
+
+Nếu kết nối model bị gián đoạn, Vibe Studio có thể tiếp tục trên **cùng model** với tối đa hai lần phục hồi.
+
+Hệ thống giữ:
+
+- checkpoint;
+- kết quả tool đã hoàn thành;
+- trạng thái task hợp lệ.
+
+Các tool call chưa hoàn chỉnh sẽ bị loại bỏ để tránh ghi hoặc chạy lại thao tác có kết quả không xác định.
+
+---
+
+# ⚙️ Kết nối model
+
+Vibe Studio hỗ trợ các API tương thích OpenAI.
+
+Bạn chỉ cần cấu hình:
+
+```text
+API URL
+API Key
+Model Name
+```
+
+Điều này cho phép sử dụng nhiều provider và model khác nhau mà không khóa ứng dụng vào một dịch vụ duy nhất.
+
+---
+
+# 📦 Tải Vibe Studio
+
+Mở:
+
+[**Vibe Studio 1.0 Releases**](https://github.com/Tungdota53/cutty-studio/releases/tag/v1.0.0)
+
+Chọn bản dành cho **Windows x64**.
+
+| Tệp | Mục đích |
+|---|---|
+| `Vibe-Studio-1.0.0-x64-Setup.exe` | Cài ứng dụng và tạo shortcut |
 | `Vibe-Studio-1.0.0-x64-Portable.exe` | Chạy trực tiếp, không cần cài đặt |
-| `SHA256SUMS-1.0.0.txt` | Đối chiếu checksum của các tệp tải xuống |
+| `SHA256SUMS-1.0.0.txt` | Kiểm tra checksum tệp tải xuống |
 
-1. Mở ứng dụng và chọn thư mục dự án.
-2. Vào **Cài đặt**, nhập URL API, khóa API và tên model của nhà cung cấp.
-3. Chọn context tự động hoặc nhập giới hạn thực tế của model.
-4. Trò chuyện trực tiếp hoặc chọn **Teamwork** để giao việc cho nhóm agent.
-5. Mở **Thiết lập agent** để chỉnh model, skill và số agent chạy đồng thời.
+---
 
-Ứng dụng đi kèm runtime nên không cần cài Node.js để mở app. Dự án vẫn cần các công cụ tương ứng như Git, npm hoặc Python khi tác vụ sử dụng chúng. Khóa API được mã hóa bằng Windows khi hệ thống hỗ trợ; nếu không, khóa chỉ giữ trong phiên làm việc.
+# 🚀 Bắt đầu
 
-## Phím tắt
+### 1. Mở dự án
+
+Khởi động Vibe Studio và chọn thư mục dự án.
+
+### 2. Kết nối model
+
+Vào **Cài đặt** và nhập:
+
+- API URL;
+- API key;
+- tên model.
+
+### 3. Thiết lập context
+
+Chọn:
+
+- **Auto**
+
+hoặc nhập giới hạn context thực tế của model.
+
+### 4. Bắt đầu làm việc
+
+Bạn có thể:
+
+- chat trực tiếp với dự án;
+
+hoặc:
+
+- mở **Teamwork** để giao việc cho nhiều agent.
+
+### 5. Tùy chỉnh agent
+
+Mở **Thiết lập agent** để cấu hình:
+
+- model;
+- skill;
+- vai trò;
+- số agent chạy đồng thời.
+
+---
+
+# ⌨️ Phím tắt
 
 | Phím | Chức năng |
-| --- | --- |
-| `Ctrl + N` | Tạo chat mới |
-| `Ctrl + ,` | Mở cài đặt |
+|---|---|
+| `Ctrl + N` | Chat mới |
+| `Ctrl + ,` | Mở Cài đặt |
 | `Enter` | Gửi yêu cầu |
 | `Shift + Enter` | Xuống dòng |
 
-## Phát triển từ mã nguồn
+---
 
-Yêu cầu Node.js 22.12 trở lên để phát triển và đóng gói desktop.
+# 🛠 Phát triển từ source
+
+Yêu cầu:
+
+```text
+Node.js >= 22.12
+```
+
+Cài dependency:
 
 ```powershell
 npm install
+```
+
+Chạy desktop app:
+
+```powershell
 npm run desktop
 ```
 
+Chạy test:
+
 ```powershell
 npm test
+```
+
+Đóng gói:
+
+```powershell
 npm run desktop:pack
 ```
 
-Bản Setup và Portable được tạo trong thư mục `release`. Cấu hình nhóm agent lưu theo dự án tại `.vibe/config.json`; lịch sử và dữ liệu phiên nằm trong `.vibe`.
+Các bản build được tạo trong:
 
-## Lưu ý khi sử dụng
+```text
+release/
+```
 
-- Context và đầu ra vẫn chịu giới hạn thực tế của model/nhà cung cấp. Số token ước tính không thay thế số liệu tính phí của API.
-- Phiên lỗi hoặc phiên đang chạy khi đóng app không tự thực thi lại các lệnh ghi tệp khi mở lại.
-- Các thay đổi trong worktree cần được kiểm tra và tích hợp vào nhánh dự án.
-- Chỉ cấp quyền thực thi lệnh và sửa tệp cho agent trong dự án bạn tin cậy. Lệnh nguy hiểm cần phê duyệt.
-- Bản Windows hiện chưa có chữ ký số nhà phát hành.
+---
 
-Giấy phép và thông tin nguồn của các skill được giữ cùng từng gói trong `src/vendor-skills`.
+# 📁 Dữ liệu dự án
 
-### Kiểm tra dự án cục bộ
+Cấu hình agent được lưu theo từng project:
 
-- Công cụ `inspect_project` nhận diện Node/Electron, liệt kê dependency, dấu vết SHA-256, install hooks và ứng viên lỗi cấu hình Electron. Không chạy script hoặc cài dependency.
-- Ba skill tích hợp tự chọn theo vai: khảo sát dự án, bằng chứng dependency và rà soát Electron. Báo cáo phân biệt quan sát tĩnh với lỗ hổng đã xác minh; giữ UNVERIFIED khi chưa có kiểm tra thực thi.
+```text
+.vibe/config.json
+```
+
+Lịch sử chat, session và dữ liệu runtime nằm trong:
+
+```text
+.vibe/
+```
+
+---
+
+# 💻 Runtime
+
+Ứng dụng desktop đã đóng gói runtime cần thiết để khởi động, vì vậy bạn **không cần cài Node.js chỉ để mở Vibe Studio**.
+
+Tuy nhiên, project của bạn vẫn cần các runtime hoặc công cụ mà chính project sử dụng, ví dụ:
+
+- Git;
+- npm;
+- Node.js;
+- Python;
+- browser cho Playwright.
+
+---
+
+# 🔑 Bảo vệ API Key
+
+API key được mã hóa bằng cơ chế bảo vệ của Windows khi hệ thống hỗ trợ.
+
+Nếu môi trường không hỗ trợ cơ chế lưu an toàn, key chỉ được giữ trong phiên hiện tại thay vì ghi xuống đĩa theo cách không an toàn.
+
+---
+
+# ⚠️ Lưu ý
+
+- Context và output vẫn chịu giới hạn thực tế của model/provider.
+- Token hiển thị trong ứng dụng là số liệu ước tính và không thay thế billing chính thức từ API provider.
+- Phiên bị lỗi hoặc đang chạy khi đóng ứng dụng sẽ không tự chạy lại thao tác ghi khi mở lại.
+- Thay đổi trong Git worktree cần được kiểm tra trước khi tích hợp vào nhánh chính.
+- Chỉ cấp quyền chạy lệnh và sửa tệp cho agent khi bạn tin cậy project.
+- Lệnh nguy hiểm yêu cầu phê duyệt.
+- Bản Windows hiện tại **chưa có chữ ký số nhà phát hành**.
+
+---
+
+# 📜 Skill provenance
+
+Thông tin giấy phép và nguồn của các skill đi kèm được lưu cùng từng package tại:
+
+```text
+src/vendor-skills
+```
+
+Vibe Studio không coi các nguồn bên ngoài là đã được chứng nhận chỉ vì chúng có thể được tải về.
+
+Các package tích hợp được kiểm tra theo:
+
+- nguồn;
+- commit;
+- checksum;
+- license;
+- runtime yêu cầu.
+
+---
+
+## Vibe Studio 1.0
+
+**Chat với codebase.  
+Điều phối nhiều agent.  
+Theo dõi mọi thay đổi.  
+Kiểm chứng trước khi hoàn tất.**
+
+[**Tải Vibe Studio 1.0 →**](https://github.com/Tungdota53/cutty-studio/releases/tag/v1.0.0)
+
+[**Xem source code →**](https://github.com/Tungdota53/cutty-studio)
