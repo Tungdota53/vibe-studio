@@ -122,7 +122,7 @@ function showHistory(sessions) {
     button.onclick = () => {
       if (busy) return toast('Hãy dừng tác vụ trước khi chuyển cuộc trò chuyện.');
       currentSession = session.id; $('chat-title').textContent = session.task || 'Cuộc trò chuyện';
-      cancelAnimationFrame(streamFrame); resetProgress(); assistant = null; response = ''; $('messages').replaceChildren(); $('welcome').hidden = true; progress({id:'history-loading',message:'Đang tải cuộc trò chuyện…',status:'running'});
+      cancelAnimationFrame(streamFrame); resetProgress(); TeamMap.reset(); assistant = null; response = ''; $('messages').replaceChildren(); $('welcome').hidden = true; progress({id:'history-loading',message:'Đang tải cuộc trò chuyện…',status:'running'});
       send({ type: 'get_conversation', sessionId: session.id }); showHistory(sessions);
     };
     $('history').append(button);
@@ -188,7 +188,7 @@ function connect() {
         pendingSettings = null; $('api-key').value = ''; $('settings-dialog').close(); toast('Đã cập nhật kết nối.'); if (currentSession) send({ type: 'get_conversation', sessionId: currentSession }); break;
       case 'sessions': showHistory(msg.sessions || []); break;
       case 'conversation':
-        if (msg.sessionId !== currentSession) break;
+        if (msg.sessionId !== currentSession || busy) break;
         TeamMap.restore({ sessionId: msg.sessionId.startsWith('session-') ? msg.sessionId : null, tasks: msg.tasks || [], gate: msg.gate, pipeline: msg.pipeline, goal: $('chat-title').textContent }, true);
         resetProgress(); $('messages').replaceChildren();
         for (const item of msg.messages || []) renderText(addMessage(item.role, item.content), item.content);

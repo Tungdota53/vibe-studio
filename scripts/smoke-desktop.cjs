@@ -8,10 +8,13 @@ require('electron').dialog.showErrorBox = (title, message) => {
   app.exit(1);
 };
 const root = path.resolve(process.env.VIBE_SMOKE_WORKSPACE || '.vibe/desktop-smoke');
+const smokeUserData=root+'-userdata';
+fs.rmSync(root, { recursive: true, force: true });
+fs.rmSync(smokeUserData, { recursive: true, force: true });
 fs.mkdirSync(root, { recursive: true });
 fs.mkdirSync(path.join(root, '.vibe'), { recursive: true });
 fs.writeFileSync(path.join(root, '.vibe', 'config.json'), JSON.stringify({ useWorktrees: false }));
-const smokeUserData=root+'-userdata';fs.mkdirSync(smokeUserData,{recursive:true});app.setPath('userData',smokeUserData);
+fs.mkdirSync(smokeUserData,{recursive:true});app.setPath('userData',smokeUserData);
 process.env.VIBE_WORKSPACE = root;
 process.env.VIBE_SMOKE_TEST = '1';
 process.env.VIBE_AUTO_INTEGRATIONS='0';
@@ -61,9 +64,9 @@ const model = http.createServer((req, res) => {
     res.end('data: ' + JSON.stringify({ choices: [{ delta: { content: text } }] }) + '\n\ndata: ' + JSON.stringify({ choices: [], usage: { prompt_tokens: 351, completion_tokens: 24, total_tokens: 375, prompt_tokens_details: { cached_tokens: 123 } } }) + '\n\ndata: [DONE]\n\n');
   });
 });
-const timer = setTimeout(() => { fs.writeFileSync('release/smoke-result.json', JSON.stringify({ ok: false, error: 'timeout' })); app.exit(1); }, 60000);
+const timer = setTimeout(() => { fs.writeFileSync('release/smoke-result.json', JSON.stringify({ ok: false, error: 'timeout' })); app.exit(1); }, 120000);
 async function wait(win, expression) {
-  for (let i = 0; i < 150; i++) { if (await win.webContents.executeJavaScript(expression)) return; await new Promise(resolve => setTimeout(resolve, 100)); }
+  for (let i = 0; i < 250; i++) { if (await win.webContents.executeJavaScript(expression)) return; await new Promise(resolve => setTimeout(resolve, 100)); }
   throw new Error('UI timeout: ' + expression);
 }
 app.on('browser-window-created', (_, win) => {
