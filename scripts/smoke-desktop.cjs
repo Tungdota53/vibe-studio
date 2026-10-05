@@ -149,9 +149,15 @@ app.on('browser-window-created', (_, win) => {
       await wait(win, `document.getElementById('stop-button').hidden && document.getElementById('messages').textContent.includes('Kết quả Teamwork')`);
       assert.equal(fs.readFileSync(path.join(root, 'smoke-teamwork.html'), 'utf8'), '<h1>alo alo</h1>');
       const report = await win.webContents.executeJavaScript(`document.getElementById('messages').textContent`);
-      assert(!report.includes(': failed')); assert(!report.includes(': blocked')); assert(!fs.existsSync(path.join(root, '.git')));
+      assert(!fs.existsSync(path.join(root, '.git')));
       assert(report.includes('Nghiệm thu: PASS'));
+      assert(!/(?:^|\n)• [^:\n]+: (?:failed|blocked)/.test(report));
       await wait(win, `document.querySelectorAll('.agent-node.completed').length===5 && document.getElementById('map-gate').textContent==='PASS'`);
+      const failedTasks = await win.webContents.executeJavaScript(`document.querySelectorAll('.agent-node.failed').length`);
+      const blockedTasks = await win.webContents.executeJavaScript(`document.querySelectorAll('.agent-node.blocked').length`);
+      assert.equal(failedTasks, 0);
+      assert.equal(blockedTasks, 0);
+      assert.equal(await win.webContents.executeJavaScript(`document.getElementById('map-gate').textContent`), 'PASS');
       assert.equal(await win.webContents.executeJavaScript(`document.querySelectorAll('.map-edge').length`), 6);
       assert.equal(await win.webContents.executeJavaScript(`document.querySelectorAll('.map-edge-flow').length`), 0);
       await win.webContents.executeJavaScript(`document.querySelector('[data-task=T4]').click();document.getElementById('map-fit').click();`);
