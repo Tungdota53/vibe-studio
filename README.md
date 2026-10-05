@@ -801,3 +801,9 @@ Kiểm chứng trước khi hoàn tất.**
 ## Team Manager
 
 Team Manager là agent Điều phối tự theo dõi kế hoạch hiện có, gán agent cho task chưa chạy, ưu tiên và gọi thêm agent kiểm chứng còn thiếu. Các worker độc lập vẫn chạy song song theo slot. Quyết định được lưu khi tiếp tục phiên; quản lý không thay quyền ghi, tiêu chí hay kết quả nghiệm thu. Có thể bật/tắt trong Thiết lập agent và đặt model/skill cho role Điều phối hoặc agent Team Manager.
+
+## Thư viện AI theo dự án
+
+Mục **Tích hợp dự án → Thư viện AITMPL** có tìm kiếm và phân trang cho 2.043 thành phần, gồm 914 skill, 424 agent và 105 mẫu MCP. Có thể gán hướng dẫn cho từng vai, thêm agent chuyên môn, nhập MCP và đọc tài nguyên gốc ngay trong app. Agent cũng tìm và nạp skill khi cần; catalog không chiếm toàn bộ context. Snapshot và 7.149 tệp tài nguyên được đóng gói để dùng offline, có nguồn, commit và checksum.
+
+MCP cần cấu hình token/runtime trước khi bật. Hook, mod, setting và plugin dành cho engine khác được lưu như tài nguyên tham khảo, hiển thị rõ trạng thái tương thích. [Chi tiết cách dùng và phạm vi tích hợp](docs/aitmpl-catalog.md).

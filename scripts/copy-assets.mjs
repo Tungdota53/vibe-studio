@@ -9,3 +9,4 @@ fs.mkdirSync('dist/studio/public', { recursive: true });
 for (const name of fs.readdirSync('src/studio/public')) fs.copyFileSync(`src/studio/public/${name}`, `dist/studio/public/${name}`);
 fs.cpSync('src/skills', 'dist/skills', { recursive: true });
 fs.cpSync('src/vendor-skills', 'dist/vendor-skills', { recursive: true });
+fs.cpSync('src/template-assets', 'dist/template-assets', { recursive: true });

@@ -228,6 +228,14 @@ app.on('browser-window-created', (_, win) => {
       await win.webContents.executeJavaScript(`document.getElementById('preview-close').click()`);
       await win.webContents.executeJavaScript(`document.getElementById('integration-button').click()`);
       await wait(win, `document.getElementById('integration-results').querySelectorAll('section').length>0`);
+      await wait(win, `document.getElementById('catalog-results').querySelectorAll('section').length===24`);
+      await win.webContents.executeJavaScript(`document.getElementById('catalog-query').value='frontend';document.getElementById('catalog-kind').value='skills';document.getElementById('catalog-query').dispatchEvent(new Event('input'))`);
+      await wait(win, `document.getElementById('catalog-results').textContent.includes('frontend-design')`);
+      await win.webContents.executeJavaScript(`document.getElementById('catalog-results').querySelector('button').click()`);
+      await wait(win, `!document.getElementById('catalog-detail').hidden && document.getElementById('catalog-preview').textContent.length>100`);
+      await win.webContents.executeJavaScript(`document.getElementById('catalog-role').value='coder';document.getElementById('catalog-apply').click()`);
+      await wait(win, `document.getElementById('catalog-status').textContent.includes('Đã gán')`);
+      assert.ok(JSON.parse(fs.readFileSync(path.join(root,'.vibe','config.json'),'utf8')).agentProfiles.coder.skills.some(id=>id.startsWith('aitmpl:skills/')));
       await win.webContents.executeJavaScript(`document.getElementById('integration-auto').click()`);
       await wait(win, `document.getElementById('integration-auto').checked && !document.getElementById('integration-auto').disabled`);
       await win.webContents.executeJavaScript(`document.getElementById('integration-auto').click()`);

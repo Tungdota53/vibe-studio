@@ -1,0 +1,20 @@
+{
+  "repository": "davila7/claude-code-templates",
+  "commit": "ef41915c4b69c2b8e2dfa37ae65977e438f853d0",
+  "indexSha256": "fd5bc4d3d636bdeb7332ee5ab78a776d0fbd74ab36b3d89456cbb5e95f327aab",
+  "entryCount": 2043,
+  "resourceCount": 7149,
+  "counts": {
+    "skills": 914,
+    "agents": 424,
+    "commands": 348,
+    "mcps": 105,
+    "settings": 72,
+    "hooks": 63,
+    "loops": 18,
+    "mods": 39,
+    "sandbox": 12,
+    "templates": 14,
+    "plugins": 34
+  }
+}

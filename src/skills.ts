@@ -8,6 +8,7 @@ import type { Config } from './config.js';
 import { safePath, isSensitivePath } from './security.js';
 import crypto from 'node:crypto';
 import { recommendationScore, skillRoutes } from './skill-routing.js';
+import { templateCatalog } from './template-catalog.js';
 
 export interface Skill { id: string; name: string; description: string; source: string; file: string; recommendedRoles?: Role[]; requires?: string[]; provenance?: { repository: string; commit: string; license: string; url: string; integrity: boolean; bundleDigest?: string; adaptation?: string; sourcePaths?: string[] } }
 // Copies are equivalent only after every manifest file has been verified. A
@@ -61,6 +62,10 @@ export class SkillLibrary {
     return result;
   }
   resolve(id: string, list = this.list()) {
+    if (id.startsWith('aitmpl:')) {
+      const item = templateCatalog.get(id);
+      return { id, name: item.name, description: item.description, source: 'aitmpl', file: item.primary || '' };
+    }
     const exact = list.find(skill => skill.id === id);
     if (exact) return exact;
     const named = list.filter(skill => skill.name === id);
@@ -72,6 +77,7 @@ export class SkillLibrary {
     return named[0];
   }
   load(id: string, catalog?: Skill[]) {
+    if (id.startsWith('aitmpl:')) return templateCatalog.instructions(id);
     const skill = this.resolve(id, catalog);
     if (skill.provenance && !skill.provenance.integrity) throw new Error(`Skill ${id} không khớp checksum nguồn GitHub`);
     if (fs.statSync(skill.file).size > 64000) throw new Error('Skill vượt giới hạn 64 KB');
@@ -85,6 +91,10 @@ export class SkillLibrary {
     return { ...skill, instructions };
   }
   resource(id: string, resource: string, startLine = 1, endLine = startLine + 299) {
+    if (id.startsWith('aitmpl:')) {
+      const result = templateCatalog.read(id, resource, startLine, endLine);
+      return result.content + (result.nextLine ? `\n[Đọc tiếp từ dòng ${result.nextLine}; tổng ${result.totalLines} dòng]` : '');
+    }
     const skill = this.resolve(id, this.list(id));
     if (skill.provenance && !skill.provenance.integrity) throw new Error('Skill không khớp checksum');
     if (isSensitivePath(resource)) throw new Error('Tài nguyên chứa thông tin nhạy cảm bị chặn');
@@ -100,7 +110,11 @@ export class SkillLibrary {
   }
   search(query: string, catalog = this.list()) {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-    return catalog.map(skill => ({ ...skill, score: terms.reduce((score, term) => score + (skill.name.toLowerCase().includes(term) ? 3 : skill.description.toLowerCase().includes(term) ? 1 : 0), 0) })).filter(skill => !terms.length || skill.score > 0).sort((a, b) => b.score - a.score).slice(0, 20);
+    const local = catalog.map(skill => ({ ...skill, score: terms.reduce((score, term) => score + (skill.name.toLowerCase().includes(term) ? 3 : skill.description.toLowerCase().includes(term) ? 1 : 0), 0) })).filter(skill => !terms.length || skill.score > 0).sort((a, b) => b.score - a.score);
+    const external = templateCatalog.search(query, 'skills', 0, 20).items.map(item => ({ id: item.id, name: item.name, description: item.description, source: 'aitmpl', file: item.primary || '', score: item.score }));
+    // Local explicit/project skills retain priority. The full external catalog is
+    // searched on demand rather than inserted into every agent's context.
+    return [...local.slice(0, 12), ...external, ...local.slice(12)].slice(0, 20);
   }
   select(role: Role, task: string, config?: Partial<Config>, explicit: string[] = [], catalog = this.list()) {
     const profile = roleProfile(role, config);
@@ -119,6 +133,13 @@ export class SkillLibrary {
       }
     }
     // User/system skills still require explicit selection.
+    if (profile.autoSkills && config?.autoIntegrations === true && selected.length < 8) {
+      const recommendation = templateCatalog.search(task, 'skills', 0, 12).items.find(item => item.score >= 8 && item.role === role && !selected.some(skill => skill.id === item.id));
+      if (recommendation) {
+        const loaded = this.load(recommendation.id, catalog);
+        if (selected.reduce((total, skill) => total + skill.instructions.length, 0) + loaded.instructions.length <= 24000) selected.push(loaded);
+      }
+    }
     if (profile.autoSkills) for (const skill of this.search(task, catalog).filter(skill => ['project', 'workspace'].includes(skill.source) && skill.score >= 3)) {
       if (selected.length >= 4) break;
       if (!selected.some(item => item.id === skill.id || sameBundle(item, skill))) {

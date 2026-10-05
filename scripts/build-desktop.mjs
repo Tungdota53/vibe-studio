@@ -13,6 +13,7 @@ function copyTree(source, destination) {
 copyTree('src/studio/public', 'build/runtime/public');
 copyTree('src/skills', 'build/runtime/skills');
 copyTree('src/vendor-skills', 'build/runtime/vendor-skills');
+copyTree('src/template-assets', 'build/runtime/template-assets');
 for (const name of ['better-sqlite3', 'bindings', 'file-uri-to-path']) {
   const destination = path.join('build/runtime/node_modules', name);
   fs.mkdirSync(destination, { recursive: true });

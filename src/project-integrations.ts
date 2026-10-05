@@ -1,3 +1,4 @@
+import { templateCatalog } from './template-catalog.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -41,7 +42,7 @@ export class ProjectIntegrations {
       return {id:skill.id,name:skill.name,roles,score,repository:skill.provenance!.repository,url:skill.provenance!.url,commit:skill.provenance!.commit,license:skill.provenance!.license};
     }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id)).slice(0,6);
     const webTask=/(website|frontend|giao diện|trang web|landing page|\bhtml\b|\bcss\b)/i.test(task);
-    return {project,skills:candidates,mcp:[...(project.web||webTask?[{id:'auto-playwright',name:'Playwright',source:'https://github.com/microsoft/playwright-mcp',reason:project.web?'Dự án web: kiểm tra giao diện bằng trình duyệt':'Yêu cầu tạo web: chuẩn bị kiểm tra giao diện',package:'@playwright/mcp'}]:[]),...(project.dependencies.length?[{id:'auto-context7',name:'Context7',source:'https://github.com/upstash/context7',reason:'Tra cứu tài liệu thư viện phát hiện trong dự án',url:'https://mcp.context7.com/mcp'}]:[])]};
+    return {project,templates:{summary:templateCatalog.summary(),recommendations:templateCatalog.search(project.summary+' '+task,'skills',0,6).items},skills:candidates,mcp:[...(project.web||webTask?[{id:'auto-playwright',name:'Playwright',source:'https://github.com/microsoft/playwright-mcp',reason:project.web?'Dự án web: kiểm tra giao diện bằng trình duyệt':'Yêu cầu tạo web: chuẩn bị kiểm tra giao diện',package:'@playwright/mcp'}]:[]),...(project.dependencies.length?[{id:'auto-context7',name:'Context7',source:'https://github.com/upstash/context7',reason:'Tra cứu tài liệu thư viện phát hiện trong dự án',url:'https://mcp.context7.com/mcp'}]:[])]};
   }
   sync(c:Config,task:string,notify:(message:string)=>void=()=>{},signal?:AbortSignal) {
     if(this.running)return this.running;

@@ -21,6 +21,7 @@ import { RunJournal } from '../run-journal.js';
 import { runBudgetSchema, modelRatesSchema } from '../budgets.js';
 import { WebPreview } from './preview.js';
 import { ProjectIntegrations } from '../project-integrations.js';
+import { templateCatalog } from '../template-catalog.js';
 import { systemPrompt } from '../prompts.js';
 import { roleCatalog, roleProfile, roles, teamSchema, assignedAgent, defaultAgents } from '../roles.js';
 import { SkillLibrary } from '../skills.js';
@@ -123,7 +124,7 @@ export async function startStudio(options?: number | StudioOptions): Promise<Stu
   const integrationSignature=(plan:any)=>JSON.stringify({project:plan.project,skills:plan.skills.slice(0,3).map((item:any)=>item.id),mcp:plan.mcp.map((item:any)=>item.id)});
   let integrationBusy=false;
   let integrationAbort:AbortController|undefined;
-  const teamConfig = () => ({ roles: roles.map(role => ({ id: role, ...roleCatalog[role], ...roleProfile(role, c) })), namedAgents: c.namedAgents || [], presets: defaultAgents, skills: skills.list().map(({ file, ...skill }) => skill), teamManager:c.teamManager!==false, maxAgents: c.maxAgents, maxAgentIterations: c.maxAgentIterations ?? 0, maxAgentToolCalls: c.maxAgentToolCalls ?? 0 });
+  const teamConfig = () => ({ roles: roles.map(role => ({ id: role, ...roleCatalog[role], ...roleProfile(role, c) })), namedAgents: c.namedAgents || [], presets: defaultAgents, skills: [...skills.list(), ...[...new Set([...Object.values(c.agentProfiles || {}).flatMap(profile => profile?.skills || []), ...(c.namedAgents || []).flatMap(agent => agent.skills || [])].filter(id => id.startsWith('aitmpl:')))].map(id => { try { return skills.resolve(id); } catch { return { id, name: id, description: 'Template không có trong snapshot hiện tại; có thể bỏ khỏi cấu hình.', source: 'aitmpl', file: '' }; } })].map(({ file, ...skill }) => skill), teamManager:c.teamManager!==false, maxAgents: c.maxAgents, maxAgentIterations: c.maxAgentIterations ?? 0, maxAgentToolCalls: c.maxAgentToolCalls ?? 0 });
   const token = typeof options === 'object' ? options.token : undefined;
 
   const clients = new Set<WebSocket>();
@@ -356,6 +357,17 @@ export async function startStudio(options?: number | StudioOptions): Promise<Stu
       }
 
       try {
+        if (['search_templates', 'read_template', 'apply_template'].includes(msg.type)) {
+          if (msg.type === 'search_templates') { ws.send(JSON.stringify({ type: 'template_results', summary: templateCatalog.summary(), ...templateCatalog.search(String(msg.query || ''), String(msg.kind || ''), Number(msg.offset || 0)) })); return; }
+          if (msg.type === 'read_template') { ws.send(JSON.stringify({ type: 'template_detail', ...templateCatalog.read(String(msg.id), msg.resource === undefined ? undefined : String(msg.resource), Number(msg.startLine || 1)) })); return; }
+          if (busy || integrationBusy) throw new Error('Đợi phiên hiện tại hoàn tất trước khi áp dụng template');
+          const result = templateCatalog.apply(c.workspace, c, String(msg.id), msg.role);
+          c = result.config; client = new ModelClient(c); router = new ModelRouter(c);
+          ws.send(JSON.stringify({ type: 'template_applied', message: result.message }));
+          broadcast({ type: 'team_config', ...teamConfig() });
+          broadcast({ type: 'mcp_status', servers: await McpRegistry.forWorkspace(c.workspace, c.mcpServers).discover() });
+          return;
+        }
         if(integrationBusy&&['configure','configure_team','configure_mcp','configure_budget','configure_integrations','restore_checkpoint'].includes(msg.type))throw new Error('Đang thiết lập tích hợp; đợi hoặc dừng trước khi đổi cấu hình.');
         if(['get_integrations','sync_integrations','configure_integrations'].includes(msg.type)){
           if(msg.type==='get_integrations'){let report=null;try{report=JSON.parse(fs.readFileSync(path.join(c.workspace,'.vibe','integrations','report.json'),'utf8'))}catch{}ws.send(JSON.stringify({type:'integration_state',enabled:c.autoIntegrations!==false,plan:integrations.scan(String(msg.task || '')),report}));return;}
