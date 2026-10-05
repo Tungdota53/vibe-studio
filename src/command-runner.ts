@@ -1,4 +1,18 @@
 import { execa, execaCommand } from 'execa';
+import fs from 'node:fs';
+const commandLeases=new Map<string,Promise<void>>();
+/** Model agents remain parallel; commands sharing build/runtime output are serialized. */
+export async function withCommandLease<T>(cwd:string,signal:AbortSignal|undefined,run:()=>Promise<T>,onStatus?:(status:'waiting'|'running')=>void):Promise<T>{
+  const canonical=fs.realpathSync(cwd),key=process.platform==='win32'?canonical.toLowerCase():canonical;
+  const previous=commandLeases.get(key)||Promise.resolve();let release!:()=>void;
+  if(commandLeases.has(key))onStatus?.('waiting');
+  const held=new Promise<void>(resolve=>release=resolve),tail=previous.then(()=>held);commandLeases.set(key,tail);
+  try{
+    signal?.throwIfAborted();
+    await new Promise<void>((resolve,reject)=>{const abort=()=>{signal?.removeEventListener('abort',abort);reject(signal?.reason||new Error('Command wait cancelled'));};signal?.addEventListener('abort',abort,{once:true});previous.then(()=>{signal?.removeEventListener('abort',abort);resolve();},reject);if(signal?.aborted)abort();});
+    signal?.throwIfAborted();onStatus?.('running');return await run();
+  }finally{release();void tail.then(()=>{if(commandLeases.get(key)===tail)commandLeases.delete(key);});}
+}
 
 /** Own the deadline and terminate descendants before the shell loses their PIDs.
  * A shell timeout alone can leave Node/Chromium holding stdout open on Windows.
@@ -6,7 +20,7 @@ import { execa, execaCommand } from 'execa';
 export async function runCommand(command: string, cwd: string, timeoutMs: number, signal?: AbortSignal): Promise<{ exitCode?: number; stdout: string; stderr: string }> {
   signal?.throwIfAborted();
   const options = { cwd, windowsHide: true, reject: false as const, detached: process.platform !== 'win32', maxBuffer: 2 * 1024 * 1024 };
-  const child = process.platform === 'win32' && /^\s*@['"]\r?\n/.test(command)
+  const child = process.platform === 'win32' && (/^\s*@['"]\r?\n/.test(command)||/^\s*(?:Get-ChildItem|Get-Content|Select-String|Test-Path|Write-Output|Get-Process)\b/.test(command))
     ? execa('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], options)
     : execaCommand(command, { ...options, shell: true });
   let timer: ReturnType<typeof setTimeout> | undefined;

@@ -5,13 +5,19 @@ import { safePath } from './security.js';
 import type { Message, Task } from './types.js';
 import { taskPhase } from './team-protocol.js';
 
-export interface TaskEvidence { inspected: boolean; successfulChecks: number; failedChecks: number; toolErrors: number; commands?: Record<string, string>; checks?: { command: string; exitCode: number; excerpt: string; kind?: 'probe' | 'artifact' | 'verification' }[]; executionErrors?: { command: string; error: string }[]; files?: Record<string, string | null>; stale?: boolean }
+export interface TaskEvidence { inspected: boolean; successfulChecks: number; failedChecks: number; toolErrors: number; sequence?:number; commands?: Record<string, string>; checks?: { command: string; exitCode: number; excerpt: string; sequence?:number; kind?: 'probe' | 'artifact' | 'search' | 'verification' }[]; executionErrors?: { command: string; error: string; sequence?:number }[]; files?: Record<string, string | null>; stale?: boolean }
+function standalone(command:string){if(command.includes('$(')||command.includes('`'))return false;let quote='';for(const character of command){if(quote){if(character===quote)quote='';continue;}if(character==='"'||character==="'"){quote=character;continue;}if(/[;&|<>^\r\n]/.test(character))return false;}return !quote;}
+export function isSearchCommand(command:string,required:readonly string[]=[]){return !required.some(item=>item.trim()===command.trim())&&standalone(command)&&/^(?:rg|findstr)(?:\.exe)?\s+/.test(command.trim());}
+export function advisoryCheck(check:{command:string;exitCode:number},required:readonly string[]=[]){return isAdvisoryCommand(check.command,required)||(check.exitCode<=1&&isSearchCommand(check.command,required));}
+/** Full attempt history remains local; the latest result of each exact command gates acceptance. */
+export function latestChecks(proof:TaskEvidence){const latest=new Map<string,NonNullable<TaskEvidence['checks']>[number]>();for(const check of proof.checks||[])latest.set(check.command.trim(),check);return [...latest.values()];}
 /** Only exact, standalone runtime version probes are advisory. Compound commands,
  * test runners and explicitly required probes remain acceptance evidence. */
 export function isEnvironmentProbe(command: string, required: readonly string[] = []) {
   const normalized = command.trim().replace(/\s+/g, ' ');
   if (required.some(item => item.trim().replace(/\s+/g, ' ') === normalized)) return false;
   if (/^(?:python(?:3)?|py|node|npm|npx|git|ruby|go|cargo|rustc|java)(?:\.exe)? (?:--version|-V)$/i.test(normalized)) return true;
+  if(standalone(command)&&/^npm ls (?:playwright|playwright-core|@playwright\/test)(?: (?:playwright|playwright-core|@playwright\/test))* --depth=0$/.test(normalized))return true;
   // A narrowly recognized import-only availability check. Tests, assertions,
   // additional statements and shell chains never receive this exemption.
   const python = command.trim().match(/^(?:python(?:3)?|py)(?:\.exe)? -c (["'])([\s\S]+)\1$/i);
@@ -27,11 +33,11 @@ export function isAdvisoryCommand(command: string, required: readonly string[] =
 export function verificationEvidence(task: Pick<Task, 'verificationCommands'>, proof?: TaskEvidence) {
   if (!proof) return { successfulChecks: 0, failedChecks: 0, warnings: 0, failures: [] as string[] };
   if (!proof.checks && !proof.executionErrors) return { successfulChecks: proof.successfulChecks, failedChecks: proof.failedChecks, warnings: 0, failures: [] as string[] };
-  const checks = (proof.checks || []).filter(check => !isAdvisoryCommand(check.command, task.verificationCommands));
-  const errors = (proof.executionErrors || []).filter(error => !isAdvisoryCommand(error.command, task.verificationCommands));
+  const checks = latestChecks(proof).filter(check => !advisoryCheck(check, task.verificationCommands));
+  const errors = (proof.executionErrors || []).filter(error => !isAdvisoryCommand(error.command, task.verificationCommands)&&!checks.some(check=>check.command.trim()===error.command.trim()&&check.sequence!==undefined&&error.sequence!==undefined&&check.sequence>error.sequence));
   return { successfulChecks: checks.filter(check => check.exitCode === 0).length,
     failedChecks: checks.filter(check => check.exitCode !== 0).length + errors.length,
-    warnings: (proof.checks || []).filter(check => check.exitCode !== 0 && isAdvisoryCommand(check.command, task.verificationCommands)).length + (proof.executionErrors || []).filter(error => isAdvisoryCommand(error.command, task.verificationCommands)).length,
+    warnings: (proof.checks || []).filter(check => check.exitCode !== 0 && advisoryCheck(check, task.verificationCommands)).length + (proof.executionErrors || []).filter(error => isAdvisoryCommand(error.command, task.verificationCommands)).length,
     failures: [...checks.filter(check => check.exitCode !== 0).map(check => `${check.command.slice(0, 200)} · exit=${check.exitCode}`), ...errors.map(error => `${error.command.slice(0, 200)} · ${error.error.slice(0, 300)}`)] };
 }
 /** Development experiments remain in the log. A coder is accepted only through
@@ -42,7 +48,7 @@ export function gateEvidence(task: Pick<Task, 'role' | 'verificationCommands'>, 
   const required = task.verificationCommands || [];
   const failures = required.flatMap(command => {
     const last = proof.checks!.filter(check => check.command.trim() === command.trim()).at(-1);
-    const errors = (proof.executionErrors || []).filter(error => error.command.trim() === command.trim());
+    const errors = (proof.executionErrors || []).filter(error => error.command.trim() === command.trim()&&!(last?.sequence!==undefined&&error.sequence!==undefined&&last.sequence>error.sequence));
     return [...(last && last.exitCode !== 0 ? [`${command.slice(0,200)} · exit=${last.exitCode}`] : []), ...errors.map(error => `${command.slice(0,200)} · ${error.error.slice(0,300)}`)];
   });
   return { ...summary, failedChecks: failures.length, failures };
@@ -87,15 +93,17 @@ export function recordEvidence(evidence: TaskEvidence, item: Message, calls: Map
   if (!exit) {
     if (result.ok === false) {
       const command = evidence.commands?.[item.tool_call_id || ''] || (tool === 'run_tests' ? 'run_tests' : '');
-      (evidence.executionErrors ||= []).push({ command, error: typeof result.error === 'string' ? result.error : 'Command did not produce a completed execution result' });
+      evidence.sequence=(evidence.sequence||0)+1;
+      (evidence.executionErrors ||= []).push({ command, error: typeof result.error === 'string' ? result.error : 'Command did not produce a completed execution result',sequence:evidence.sequence });
       if (!isAdvisoryCommand(command, required)) evidence.failedChecks++;
     }
     return;
   }
   if (result.ok !== true && exit[1] === '0') return;
   const command = output.match(/^command=([^\r\n]+)/)?.[1] || evidence.commands?.[item.tool_call_id || ''] || '';
-  const kind = isEnvironmentProbe(command, required) ? 'probe' : isReportCommand(command, required) ? 'artifact' : 'verification';
-  (evidence.checks ||= []).push({ command, exitCode: Number(exit[1]), excerpt: output.slice(0, 3000), kind });
+  const kind = isEnvironmentProbe(command, required) ? 'probe' : isReportCommand(command, required) ? 'artifact' : Number(exit[1])<=1&&isSearchCommand(command,required)?'search':'verification';
+  evidence.sequence=(evidence.sequence||0)+1;
+  (evidence.checks ||= []).push({ command, exitCode: Number(exit[1]), excerpt: output.slice(0, 3000), kind,sequence:evidence.sequence });
   if (kind === 'verification') { if (exit[1] === '0') evidence.successfulChecks++; else evidence.failedChecks++; }
 }
 
@@ -124,6 +132,7 @@ export function reviewVerdict(task: Task): 'PASS' | 'FAIL' | 'UNVERIFIED' {
   try {
     const report = JSON.parse((task.resultSummary || '').replace(/^```(?:json)?\s*|\s*```$/g, ''));
     if (report.verdict === 'PASS' && Array.isArray(report.findings) && report.findings.length === 0) return 'PASS';
+    if (report.verdict === 'UNVERIFIED') return 'UNVERIFIED';
     if (report.verdict === 'FAIL' || report.findings?.length) return 'FAIL';
   } catch { /* Free-form claims are not a structured review verdict. */ }
   return 'UNVERIFIED';

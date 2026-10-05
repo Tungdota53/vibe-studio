@@ -18,7 +18,7 @@ import { roleSchema, roleCatalog, assignedAgent, canUseTool } from './roles.js';
 import { SkillLibrary } from './skills.js';
 import { dependencyFingerprints, qualityGate, verificationEvidence, recordEvidence, reviewVerdict, staleEvidence, structuredHandoff, writeAgentArtifact, type TaskEvidence } from './team-artifacts.js';
 import { executionBatch, handoffContract, phaseAgents, phaseSchema, taskPhase, validateProtocol, waitingReason } from './team-protocol.js';
-import { canRetryTask, repairSignature } from './team-recovery.js';
+import { canRetryTask, repairSignature, observeRepairProgress, isDependencyAudit, type RepairProgress } from './team-recovery.js';
 import { setTimeout as recoveryDelay } from 'node:timers/promises';
 import { scheduleRepairs, type RepairFinding } from './team-repair.js';
 import { Pipeline } from './pipeline.js';
@@ -158,9 +158,9 @@ export class Teamwork {
     const pipeline = new Pipeline(sessionRoot, id, this.c.maxAgents);
     let repairRounds = resumed?.repairRounds || 0;
     const repairFailures = resumed?.repairFailures || {};
-    const runtimeRetries: Record<string, number> = {};
+    const runtimeRetries: Record<string, number> = (resumed as any)?.runtimeRetries || {};
+    let repairProgress:RepairProgress|undefined=(resumed as any)?.repairProgress;
     const autoResumeTasks = new Set<string>();
-    const teamBudget = new BudgetTracker({ budget: this.c.runBudget, rates: this.c.modelRates });
     this.db.session(id, 'running', this.c.model, goal);
     try {
     const worktrees = new Worktrees(this.c.workspace, root);
@@ -290,7 +290,7 @@ export class Teamwork {
     }
     this.tasks.forEach(t => this.db.task(id, t));
     let lastSnapshot = 0;
-    const snapshot = (status = 'running') => { lastSnapshot = Date.now(); durableJson(resumeFile, { version: 1, goal, planRaw, tasks: this.tasks, evidence: [...evidence], fingerprints, repairRounds, repairFailures, runtimeRetries, status }); emit({ type: 'task_snapshot', pipeline: pipeline.snapshot(this.tasks, evidence), sessionId: id, maxAgents: this.c.maxAgents, tasks: this.tasks.map(task => ({ ...task, phase: taskPhase(task), waitReason: waitingReason(task, this.tasks, this.c.maxAgents) })), timestamp: new Date().toISOString() }); };
+    const snapshot = (status = 'running') => { lastSnapshot = Date.now(); durableJson(resumeFile, { version: 1, goal, planRaw, tasks: this.tasks, evidence: [...evidence], fingerprints, repairRounds, repairFailures, runtimeRetries, repairProgress, status }); emit({ type: 'task_snapshot', pipeline: pipeline.snapshot(this.tasks, evidence), sessionId: id, maxAgents: this.c.maxAgents, tasks: this.tasks.map(task => ({ ...task, phase: taskPhase(task), waitReason: waitingReason(task, this.tasks, this.c.maxAgents) })), timestamp: new Date().toISOString() }); };
     snapshot();
     fs.mkdirSync(path.join(root, 'sessions', id), { recursive: true });
     fs.writeFileSync(path.join(root, 'sessions', id, 'plan.md'), planRaw);
@@ -413,7 +413,7 @@ export class Teamwork {
             if (['verification', 'review', 'challenge', 'audit', 'acceptance'].includes(taskPhase(t))) taskEvidence.files = dependencyFingerprints(t, this.tasks, scope);
             evidence.set(t.id, taskEvidence);
             const calls = new Map<string, string>();
-            const agent = new Agent(aid, t.role, scope, this.client, this.router, new Tools(scope, this.approve, t.role, library, t.role === 'coder' ? t.expectedFiles : undefined, t.role === 'general').setWriteBaseline(), log);
+            const agent = new Agent(aid, t.role, scope, this.client, this.router, new Tools(scope, this.approve, t.role, library, t.role === 'coder' ? t.expectedFiles : undefined, t.role === 'general').setWriteBaseline().setCommandStatus(status=>{step=status==='waiting'?'command_queue':'run_command';t.step=step;emit({type:'agent_status',agentId:aid,taskId:t.id,status:'running',step,message:status==='waiting'?'Chờ quyền chạy lệnh: một agent khác đang dùng build/runtime trong cùng workspace; không gọi model khi chờ.':'Đã nhận quyền chạy lệnh trong workspace.'});}), log);
             const memoryKey = `${id}:${t.id}:attempt-${t.retries || 0}`;
             const journal = new RunJournal(this.c.workspace, memoryKey);
             const taskBudget = taskBudgets.get(memoryKey) || new BudgetTracker({ budget: this.c.runBudget, rates: this.c.modelRates, agentId: aid, taskId: t.id }); taskBudgets.set(memoryKey, taskBudget);
@@ -493,7 +493,7 @@ export class Teamwork {
             const uncertainEffects = new RunJournal(this.c.workspace, `${id}:${t.id}:attempt-${t.retries || 0}`).status().uncertain;
             if (!isAborted && uncertainEffects.length) t.error += '\nKhông tự phát lại thao tác chưa rõ kết quả: cần kiểm tra trạng thái tệp/công cụ trước.';
             if (!isAborted && canRetryTask(e, uncertainEffects) && (runtimeRetries[t.id] || 0) < 2) pendingRetries.push({ task: t, reason: String(e) });
-            else if (!isAborted && !uncertainEffects.length && !/Integrity veto|budget|ngân sách/i.test(String(e)) && (verificationEvidence(t, failedProof).failedChecks > 0 || reviewVerdict(t) === 'FAIL')) pendingRepairs.push({ task: t, reason: String(e) + '\nExecuted checks: ' + JSON.stringify(failedProof?.checks || []), repairFiles: failedProof?.checks?.some(check => check.exitCode !== 0 && /^npm audit(?: --json)?$/.test(check.command.trim())) ? ['package.json','package-lock.json'].filter(file => fs.existsSync(path.join(scope,file))) : [] });
+            else if (!isAborted && !uncertainEffects.length && !/Integrity veto|budget|ngân sách|không tiến triển/i.test(String(e)) && (verificationEvidence(t, failedProof).failedChecks > 0 || reviewVerdict(t) === 'FAIL')) pendingRepairs.push({ task: t, reason: String(e) + '\nExecuted checks: ' + JSON.stringify(failedProof?.checks || []), repairFiles: failedProof?.checks?.some(check => check.exitCode !== 0 && isDependencyAudit(check.command)) ? ['package.json','package-lock.json'].filter(file => fs.existsSync(path.join(scope,file))) : [] });
 
             if (!isAborted && canRetryTask(e) && (runtimeRetries[t.id] || 0) >= 2) t.error += '\nTự thử lại đã dừng sau hai lần phục hồi bổ sung: lỗi kết nối vẫn còn; checkpoint được giữ.';
             this.agents.set(aid, {
@@ -545,14 +545,15 @@ export class Teamwork {
       // Drain concurrent validators before a repair invalidates their source and evidence.
       if (!pool.size && pendingRepairs.length) {
         const findings = pendingRepairs.splice(0).filter(failure => failure.task.status === 'failed');
+        const measured=observeRepairProgress(repairProgress,findings,evidence);repairProgress=measured.state;
         const sources = Object.assign({}, ...findings.map(failure => dependencyFingerprints(failure.task, this.tasks, failure.task.worktreePath || this.c.workspace)));
         for(const failure of findings)for(const file of failure.repairFiles || []){const target=path.join(failure.task.worktreePath || this.c.workspace,file);try{sources[target]=crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex');}catch{sources[target]=null;}}
         const signature = repairSignature(findings, evidence, sources);
         repairFailures[signature] = (repairFailures[signature] || 0) + 1;
-        const stalled = repairFailures[signature] >= 3;
+        const stalled = repairFailures[signature] >= 3||measured.stop;
         const repair = !this.abort.signal.aborted && !stalled && scheduleRepairs(this.tasks, findings, repairRounds + 1);
         if (!repair && !this.abort.signal.aborted) for (const {task} of findings) {
-          task.error += stalled ? '\nTự sửa đã dừng: cùng lỗi và cùng mã nguồn lặp lại 3 lần, không có tiến triển.' : '\nTự sửa đã dừng: không xác định được tệp nguồn thuộc phạm vi sửa hoặc pipeline đã đạt giới hạn 48 tác vụ.';
+          task.error += measured.stop ? '\nTự sửa đã dừng để tránh đốt token: 4 lần kiểm tra liên tiếp không giảm số task/kiểm tra/finding lỗi dù mã nguồn hoặc câu trả lời thay đổi. '+measured.message : stalled ? '\nTự sửa đã dừng: cùng lỗi và cùng mã nguồn lặp lại 3 lần, không có tiến triển.' : '\nTự sửa đã dừng: không xác định được tệp nguồn thuộc phạm vi sửa hoặc pipeline đã đạt giới hạn 48 tác vụ.';
           emit({type:'agent_status',taskId:task.id,status:'failed',step:'recovery_stopped',message:task.error}); this.db.task(id,task);
         }
         if (repair) {
@@ -565,7 +566,7 @@ export class Teamwork {
       }
       if (fatalError) { if (pool.size) { await Promise.all(pool.values()); continue; } throw fatalError; }
       if (this.abort.signal.aborted) {
-        for (const task of this.tasks) if (['pending', 'ready'].includes(task.status)) { task.status = 'cancelled'; this.db.task(id, task); }
+        for (const task of this.tasks) if (['pending', 'ready'].includes(task.status)) { task.status = 'cancelled';task.error='Đã hủy khi phiên dừng; task chưa được thực thi. Kế hoạch và checkpoint được giữ.'; this.db.task(id, task); }
       } else if (!pendingRepairs.length && !pendingRetries.length) {
         updateReady(this.tasks);
         this.tasks.filter(t => t.status === 'blocked').forEach(t => {

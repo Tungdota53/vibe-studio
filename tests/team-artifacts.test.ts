@@ -1,8 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { executionDiagnosis, qualityGate, recordEvidence, verificationEvidence, gateEvidence, isEnvironmentProbe, type TaskEvidence } from '../src/team-artifacts.js';
+import { executionDiagnosis, qualityGate, recordEvidence, verificationEvidence, gateEvidence, isEnvironmentProbe,isSearchCommand,reviewVerdict, type TaskEvidence } from '../src/team-artifacts.js';
 import { parseTeamPlan } from '../src/teamwork.js';
 
 describe('Independent teamwork evidence', () => {
+  it('uses the latest completed check without deleting earlier failures; required checks and real audit still block',()=>{
+    const proof:TaskEvidence={inspected:true,successfulChecks:1,failedChecks:3,toolErrors:0,checks:[{command:'npm run build',exitCode:1,excerpt:'ENOENT'},{command:'npm run build',exitCode:0,excerpt:'built'},{command:'npm ls playwright @playwright/test --depth=0',exitCode:1,excerpt:'missing runtime'},{command:'rg -n "secret|token" src',exitCode:1,excerpt:'no matches'}]};
+    expect(verificationEvidence({},proof)).toMatchObject({successfulChecks:1,failedChecks:0,warnings:2});expect(proof.checks).toHaveLength(4);
+    expect(verificationEvidence({verificationCommands:['npm ls playwright @playwright/test --depth=0']},proof).failedChecks).toBe(1);
+    proof.checks!.push({command:'npm audit --omit=dev',exitCode:1,excerpt:'unresolved high vulnerability'});expect(verificationEvidence({},proof).failedChecks).toBe(1);
+    for(const command of ['rg token src & npm test','rg token src ; npm test','rg token src \\& npm test','rg "$(npm test)" src','findstr token src > proof.txt'])expect(isSearchCommand(command)).toBe(false);
+    expect(isSearchCommand('rg -n "secret|token" src')).toBe(true);
+    const [task]=parseTeamPlan('{"tasks":[{"title":"Gate","role":"tester"}]}');task.resultSummary='{"verdict":"UNVERIFIED","findings":[{"title":"No browser runtime"}]}';expect(reviewVerdict(task)).toBe('UNVERIFIED');
+  });
+  it('replaces a recorded timeout with a later completed result but keeps a later timeout blocking',()=>{
+    const proof:TaskEvidence={inspected:true,successfulChecks:0,failedChecks:0,toolErrors:0},calls=new Map<string,string>();
+    recordEvidence(proof,{role:'assistant',content:'',tool_calls:[{id:'a',type:'function',function:{name:'run_command',arguments:'{"command":"npm test"}'}}]},calls);
+    recordEvidence(proof,{role:'tool',tool_call_id:'a',content:'{"ok":false,"error":"timeout"}'},calls);recordEvidence(proof,{role:'tool',tool_call_id:'a',content:'{"ok":true,"output":"exit=0\\npassed"}'},calls);expect(verificationEvidence({},proof).failedChecks).toBe(0);
+    recordEvidence(proof,{role:'tool',tool_call_id:'a',content:'{"ok":false,"error":"timeout again"}'},calls);expect(verificationEvidence({},proof).failedChecks).toBeGreaterThan(0);
+  });
   it('keeps coder experiments but requires independent execution and blocks the latest failed required command', () => {
     const tasks=parseTeamPlan(JSON.stringify({tasks:[{id:'code',title:'Code',role:'coder',verificationCommands:['npm test']},{id:'test',title:'Test',role:'tester',dependencies:['code']},{id:'review',title:'Review',role:'reviewer',dependencies:['test']}]}));tasks.forEach(task=>task.status='completed');tasks[2].resultSummary='{"verdict":"PASS","findings":[]}';
     const proof:TaskEvidence={inspected:true,successfulChecks:1,failedChecks:2,toolErrors:0,checks:[{command:'npm test',exitCode:1,excerpt:'before fix'},{command:'node diagnostic.cjs',exitCode:1,excerpt:'experiment'},{command:'npm test',exitCode:0,excerpt:'after fix'}]};

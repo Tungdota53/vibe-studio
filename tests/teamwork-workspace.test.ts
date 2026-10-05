@@ -32,6 +32,17 @@ function runner(root: string, plan: any[], reply: (messages: Message[]) => Promi
   return { team: new Teamwork(config, store, client, new ModelRouter(config), async () => false), store };
 }
 describe('Teamwork workspace mode', () => {
+  it('stops an unproductive repair campaign even when every repair changes source and failure wording',async()=>{
+    const dir=root();let fixes=0;const command='node -e "process.exit(1)"';
+    const {team}=runner(dir,[{id:'code',role:'coder',title:'Code',description:'create',expectedFiles:['a.txt']},{id:'test',role:'tester',title:'Verify',description:'verify',dependencies:['code'],verificationCommands:[command]}],async messages=>{
+      const request=messages.findLast(message=>message.role==='user')?.content||'';
+      if(!messages.some(message=>message.role==='tool')){if(request.startsWith('[REPAIR]'))fixes++;return {content:'',toolCalls:[{id:'call',type:'function',function:{name:request==='verify'?'run_command':request.startsWith('[REPAIR]')||request==='create'?'write_file':'read_file',arguments:JSON.stringify(request==='verify'?{command}:request.startsWith('[REPAIR]')||request==='create'?{path:'a.txt',content:'different source '+fixes}:{path:'a.txt'})}}]};}
+      return {content:request==='verify'?'failed wording '+fixes:request.startsWith('[REPAIR]')||request==='create'?'done':'{"verdict":"PASS","findings":[]}',toolCalls:[]};
+    });
+    const result=await team.run('Avoid unproductive repair loop',()=>{});expect(result.gate.verdict).toBe('FAIL');expect(fixes).toBe(4);expect(result.tasks.find(task=>task.id==='test')?.error).toContain('tránh đốt token');
+    const saved=JSON.parse(fs.readFileSync(path.join(dir,'.vibe','sessions',result.id,'resume.json'),'utf8'));expect(saved.repairProgress.stagnant).toBe(4);expect(saved.repairProgress.observations).toBe(5);
+    expect(result.tasks.some(task=>task.id==='repair-5')).toBe(false);
+  });
   it('accepts an adjustment during the final model response without creating another plan',async()=>{
     const dir=root();let release!:()=>void,started!:()=>void,calls=0;const waiting=new Promise<void>(resolve=>started=resolve),hold=new Promise<void>(resolve=>release=resolve);
     const {team}=runner(dir,[{id:'answer',title:'Answer',description:'original',role:'general'}],async messages=>{

@@ -20,6 +20,14 @@ function setup(reply:(messages:Message[])=>any) {
 }
 const read=(name:string)=>({content:'',toolCalls:[{id:'read-'+name,type:'function',function:{name:'read_file',arguments:JSON.stringify({path:name})}}]});
 describe('Agent progress budgets',()=>{
+  it('stops alternating unchanged reads instead of resetting on each different file',async()=>{
+    let turns=0;const {root,agent}=setup(()=>read(turns++%2?'b.txt':'a.txt'));for(const file of ['a.txt','b.txt'])fs.writeFileSync(path.join(root,file),'same');
+    await expect(agent.run('Implement')).rejects.toThrow('xen kẽ');expect(turns).toBe(11);
+  });
+  it('does not reset failing-tool protection when the agent writes another report',async()=>{
+    let turns=0;const {agent}=setup(()=>turns++%2?{content:'',toolCalls:[{id:'report-'+turns,type:'function',function:{name:'write_report',arguments:JSON.stringify({path:'reports/attempt.json',content:JSON.stringify({attempt:turns})})}}]}:{content:'',toolCalls:[{id:'bad-'+turns,type:'function',function:{name:'missing_tool',arguments:'{}'}}]});
+    await expect(agent.run('Verify')).rejects.toThrow('lặp cùng thao tác lỗi 4 lần');expect(turns).toBe(7);
+  });
   it('stops a repeated failing action even when interleaved with successful reads',async()=>{
     let turns=0; const {root,agent,state}=setup(()=> turns++ % 2 ? read('input.txt') : {content:'',toolCalls:[{id:'bad-'+turns,type:'function',function:{name:'missing_tool',arguments:'{}'}}]});
     fs.writeFileSync(path.join(root,'input.txt'),'same');
@@ -48,6 +56,6 @@ describe('Agent progress budgets',()=>{
     const {root,agent,state}=setup(()=>read('input.txt'));fs.writeFileSync(path.join(root,'input.txt'),'same');
     let checkpoint=0;
     await expect(agent.run('Implement',undefined,undefined,[],{state,checkpoint:()=>checkpoint++})).rejects.toThrow('không tiến triển');
-    expect(state.messages.filter(item=>item.role==='tool')).toHaveLength(8);expect(checkpoint).toBeGreaterThan(0);
+    expect(state.messages.filter(item=>item.role==='tool')).toHaveLength(6);expect(checkpoint).toBeGreaterThan(0);
   });
 });

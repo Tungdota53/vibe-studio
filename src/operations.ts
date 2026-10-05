@@ -74,7 +74,7 @@ export class Operations {
     let pipeline:any=null;try{pipeline=JSON.parse(fs.readFileSync(path.join(root,'pipeline.json'),'utf8'));}catch{}
     let estimate:any=null;try{estimate=JSON.parse(fs.readFileSync(path.join(root,'estimate.json'),'utf8'));}catch{}
     let adjustments:unknown[]=[];try{adjustments=JSON.parse(fs.readFileSync(path.join(root,'adjustments.json'),'utf8'));}catch{}
-    return {sessionId,status:saved.status||'unknown',pipeline,estimate,adjustments,tasks,events,memory:this.listMemory(),
+    return {sessionId,status:saved.status||'unknown',pipeline,estimate,adjustments,repairProgress:saved.repairProgress,tasks,events,memory:this.listMemory(),
       recovery:tasks.filter(task=>task.status==='failed'||task.status==='blocked'||task.id.startsWith('repair-')).map(task=>({id:task.id,title:task.title,status:task.status,reason:redact(task.error||task.description).slice(0,4000),step:task.step,checks:verificationEvidence(task,evidence.get(task.id)),retry:saved.runtimeRetries?.[task.id]||0,waitingOn:task.dependencies.filter(id=>tasks.find(item=>item.id===id)?.status!=='completed')})),
       checkpoints:new CheckpointStore(this.workspace).list().filter(item=>item.sessionId?.startsWith(sessionId+':'))};
   }

@@ -36,6 +36,16 @@ Chat có các chế độ Hỏi, Lập kế hoạch, Triển khai, Kiểm chứn
 
 Ước lượng hiển thị số task, tệp và slot từ kế hoạch. Khoảng token/thời gian chỉ hiện khi có telemetry trước; chi phí cần đơn giá đã cấu hình. Đây là khoảng tham khảo, không cam kết thời gian hoàn tất.
 
+## Bảo vệ khi tự sửa không tiến triển
+
+Hai lớp bảo vệ chạy độc lập: cùng lỗi/cùng nguồn lặp ba lần dừng như trước; thêm bộ đếm dừng sau bốn lần thẩm định liên tiếp không cải thiện số task, lệnh kiểm tra hoặc finding còn lỗi. Thay đổi hình thức mã và câu trả lời không đặt lại bộ đếm. Trạng thái được lưu trong resume.json cùng số lần retry mạng. Sửa có tiến triển đo được vẫn được tiếp tục; task và checkpoint đã hoàn tất được giữ khi dừng.
+
+Trong một agent, lỗi công cụ lặp lại không được xóa bởi thao tác ghi báo cáo hoặc ghi source không thay đổi; đọc cùng dữ liệu xen kẽ các tệp khác cũng được phát hiện. Lỗi mất tiến độ không tự kích hoạt thêm task sửa.
+
+Lệnh shell/test trong cùng workspace chia sẻ một hàng đợi để tránh build/test phá output của nhau. Agent không gọi model trong lúc đợi lease, và cancellation của một task đang chờ không giải phóng quyền của task đang chạy. Chỉ tiến trình do app sở hữu bị hủy khi timeout/cancel.
+
+Thẩm định dùng lần hoàn tất mới nhất của cùng lệnh; lịch sử lỗi và timeout vẫn được giữ. Timeout có thứ tự journal được thay thế bởi lần chạy lại hoàn tất sau đó; timeout mới hơn vẫn chặn. Một phép dò Playwright tùy chọn không chứng minh test browser đã qua; thiếu coverage được báo UNVERIFIED. Audit có lỗ hổng và test bắt buộc thất bại vẫn chặn. Audit production `npm audit --omit=dev` có thể giao sửa manifest/lock đúng phạm vi.
+
 ## Kiểm tra phát hành
 
 `npm run desktop:release:check` chạy build, toàn bộ test, Electron UI smoke, đóng gói Setup/Portable và kiểm tra EXE đã đóng gói. Nếu một bước lỗi, pipeline dừng trước phát hành. Script kiểm tra nguồn không đổi trong quá trình chạy, tạo checksum và `release/preflight.json`. Không tự upload hoặc thay đổi release GitHub.

@@ -100,6 +100,7 @@ export class Agent {
     const maxIterations = config.maxAgentIterations && config.maxAgentIterations > 0 ? config.maxAgentIterations : Infinity;
     const maxTools = config.maxAgentToolCalls && config.maxAgentToolCalls > 0 ? config.maxAgentToolCalls : Infinity;
     let previousRead = '', repeatedReads = 0;
+    const readOccurrences=new Map<string,number>();
     const repeatedFailures = new Map<string, number>();
     for (let iteration = 0, toolCount = 0; iteration < maxIterations; iteration++) {
       signal?.throwIfAborted();
@@ -240,7 +241,7 @@ export class Agent {
           repeatedFailures.set(signature, count);
           if (repeatedFailures.size > 64) repeatedFailures.delete(repeatedFailures.keys().next().value!);
           if (count >= 4) stalledFailure = `Agent không tiến triển: ${call.function.name} lặp cùng thao tác lỗi ${count} lần. Kết quả và checkpoint đã lưu; sửa nguyên nhân trước khi thử lại.`;
-        } else if (!nonmutating && !mcpSession.isReadOnly(call.function.name)) repeatedFailures.clear();
+        } else if (['write_file','edit_file'].includes(call.function.name)&&value.sourceChanged===true) {repeatedFailures.clear();readOccurrences.clear();}
       }
       state.messages.push(...exchange);
       memoryOptions.journal?.finishBatch(state);
@@ -249,6 +250,7 @@ export class Agent {
       const fingerprint = readOnlyRound ? createHash('sha256').update(JSON.stringify({ calls: result.toolCalls.map(call => call.function), results: exchange.slice(1).map(item => item.content) })).digest('hex') : '';
       repeatedReads = fingerprint && fingerprint === previousRead ? repeatedReads + 1 : 1;
       previousRead = fingerprint;
+      if(fingerprint){const count=(readOccurrences.get(fingerprint)||0)+1;readOccurrences.set(fingerprint,count);if(readOccurrences.size>64)readOccurrences.delete(readOccurrences.keys().next().value!);if(count>=6)throw new Error('Agent không tiến triển: lặp lại cùng dữ liệu đọc 6 lần, kể cả xen kẽ các công cụ khác. Đã lưu context; không tự tạo vòng sửa mới cho vòng lặp này.');}
       if (readOnlyRound && repeatedReads === 4) {
         const reminder: Message = { role: 'assistant', content: 'Progress check: the same read tools returned identical results four times. Use the evidence already collected. For a coder task, implement the assigned files now; for validation, execute the required checks or report a concrete limitation. Do not reread unchanged files without a specific new question.' };
         state.messages.push(reminder); memoryOptions.onItem?.(reminder);

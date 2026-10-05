@@ -8,6 +8,7 @@ window.TeamMap = (() => {
   const roleIcons = { planner:'⌘',coder:'⌨',tester:'◎',reviewer:'◇',judge:'✦',general:'◌' };
   const stepLabels = { model_request:'Đang chờ model', user:'Nhận nhiệm vụ',assistant:'Tổng hợp kết quả',read_file:'Đọc tệp',write_file:'Ghi tệp',edit_file:'Sửa tệp',search_files:'Tìm trong dự án',run_command:'Chạy lệnh',run_tests:'Chạy kiểm thử',git_diff:'Đọc thay đổi',load_skill:'Nạp skill',read_skill_resource:'Đọc tài nguyên skill' };
   const stepText = value => value?.startsWith('Finished ') ? 'Xong · ' + (stepLabels[value.slice(9)] || value.slice(9)) : stepLabels[value] || value;
+  stepLabels.command_queue='Chờ quyền build/test · không gọi model';
   const fallbackPhase = { planner:'survey',coder:'implementation',tester:'verification',reviewer:'review',judge:'acceptance',general:'survey' };
   let tasks = [], roster = [], live = new Map(), selected = null, zoom = 1, width = 800, height = 400, diagram = 'agents', maxAgents = 4, roleModels = {}, defaultModel = '';
   let session = null, running = false, connected = true, follow = true, goal = '', gate = null, rendering = 0, planner = null, pipeline = null;
