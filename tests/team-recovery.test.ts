@@ -1,7 +1,16 @@
 import {describe,expect,it} from 'vitest';
-import {canRetryTask,repairSignature,observeRepairProgress,isDependencyAudit,type RepairProgress} from '../src/team-recovery.js';
+import {canRetryTask,repairSignature,observeRepairProgress,isDependencyAudit,chooseRecovery,recoveryDiagnosis,type RecoveryCampaign,type RepairProgress} from '../src/team-recovery.js';
 import {parseTeamPlan} from '../src/teamwork.js';
 describe('Automatic recovery policy',()=>{
+ it('changes strategies for the same unresolved checks and preserves failed approaches through resume',()=>{
+  const [task]=parseTeamPlan('{"tasks":[{"id":"test","title":"Test","role":"tester"}]}');const proof={inspected:true,successfulChecks:0,failedChecks:1,toolErrors:0,checks:[{command:'npm test',exitCode:1,excerpt:'failed'}]};const evidence=new Map([[task.id,proof]]);let state:RecoveryCampaign|undefined;const strategies=[];
+  for(let i=0;i<9;i++){task.resultSummary='new wording '+i;const choice=chooseRecovery(state,[{task,reason:'changed source '+i}],evidence,'hash-'+i);state=JSON.parse(JSON.stringify(choice.campaign));strategies.push(choice.strategy);}
+  expect(strategies).toEqual(['direct','direct','root_cause','root_cause','reproduce','reproduce','alternate','alternate',undefined]);expect(state?.history).toHaveLength(8);
+  proof.checks=[{command:'npm run browser',exitCode:1,excerpt:'new unresolved check'}];expect(chooseRecovery(state,[{task,reason:'new problem'}],evidence,'fresh').strategy).toBe('direct');
+ });
+ it('requires actual inspection and usable diagnostic evidence before handing a diagnosis to repair',()=>{
+  const report=JSON.stringify({rootCause:'test uses stale generated output',evidence:['read config'],nextAction:'use the current source entry'});expect(recoveryDiagnosis(report,{inspected:true,successfulChecks:0,failedChecks:0,toolErrors:0})).toBeTruthy();expect(recoveryDiagnosis(report)).toBeUndefined();expect(recoveryDiagnosis('{"rootCause":"guessed","evidence":[],"nextAction":"rewrite"}',{inspected:true,successfulChecks:0,failedChecks:0,toolErrors:0})).toBeUndefined();
+ });
  it('stops source churn and reworded reports without improved validation, and persists the counter',()=>{
    const [task]=parseTeamPlan('{"tasks":[{"id":"test","title":"Test","role":"tester"}]}');const evidence=new Map([[task.id,{inspected:true,successfulChecks:0,failedChecks:1,toolErrors:0,checks:[{command:'npm test',exitCode:1,excerpt:'same unresolved test'}]}]]);let state:RepairProgress|undefined,result;
    for(let round=0;round<5;round++){task.resultSummary=JSON.stringify({verdict:'FAIL',findings:[{title:'wording '+round}]});result=observeRepairProgress(state,[{task,reason:'source version '+round}],evidence);state=JSON.parse(JSON.stringify(result.state));}

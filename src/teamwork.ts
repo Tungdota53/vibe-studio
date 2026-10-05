@@ -18,7 +18,7 @@ import { roleSchema, roleCatalog, assignedAgent, canUseTool } from './roles.js';
 import { SkillLibrary } from './skills.js';
 import { dependencyFingerprints, qualityGate, verificationEvidence, recordEvidence, reviewVerdict, staleEvidence, structuredHandoff, writeAgentArtifact, type TaskEvidence } from './team-artifacts.js';
 import { executionBatch, handoffContract, phaseAgents, phaseSchema, taskPhase, validateProtocol, waitingReason } from './team-protocol.js';
-import { canRetryTask, repairSignature, observeRepairProgress, isDependencyAudit, type RepairProgress } from './team-recovery.js';
+import { canRetryTask, repairSignature, observeRepairProgress, isDependencyAudit, chooseRecovery, recoveryDiagnosis, type RecoveryCampaign, type RepairProgress } from './team-recovery.js';
 import { setTimeout as recoveryDelay } from 'node:timers/promises';
 import { scheduleRepairs, type RepairFinding } from './team-repair.js';
 import { Pipeline } from './pipeline.js';
@@ -160,6 +160,7 @@ export class Teamwork {
     const repairFailures = resumed?.repairFailures || {};
     const runtimeRetries: Record<string, number> = (resumed as any)?.runtimeRetries || {};
     let repairProgress:RepairProgress|undefined=(resumed as any)?.repairProgress;
+    let recoveryCampaign:RecoveryCampaign|undefined=(resumed as any)?.recoveryCampaign;
     const autoResumeTasks = new Set<string>();
     this.db.session(id, 'running', this.c.model, goal);
     try {
@@ -290,7 +291,7 @@ export class Teamwork {
     }
     this.tasks.forEach(t => this.db.task(id, t));
     let lastSnapshot = 0;
-    const snapshot = (status = 'running') => { lastSnapshot = Date.now(); durableJson(resumeFile, { version: 1, goal, planRaw, tasks: this.tasks, evidence: [...evidence], fingerprints, repairRounds, repairFailures, runtimeRetries, repairProgress, status }); emit({ type: 'task_snapshot', pipeline: pipeline.snapshot(this.tasks, evidence), sessionId: id, maxAgents: this.c.maxAgents, tasks: this.tasks.map(task => ({ ...task, phase: taskPhase(task), waitReason: waitingReason(task, this.tasks, this.c.maxAgents) })), timestamp: new Date().toISOString() }); };
+    const snapshot = (status = 'running') => { lastSnapshot = Date.now(); durableJson(resumeFile, { version: 1, goal, planRaw, tasks: this.tasks, evidence: [...evidence], fingerprints, repairRounds, repairFailures, runtimeRetries, repairProgress, recoveryCampaign, status }); emit({ type: 'task_snapshot', pipeline: pipeline.snapshot(this.tasks, evidence), sessionId: id, maxAgents: this.c.maxAgents, tasks: this.tasks.map(task => ({ ...task, phase: taskPhase(task), waitReason: waitingReason(task, this.tasks, this.c.maxAgents) })), timestamp: new Date().toISOString() }); };
     snapshot();
     fs.mkdirSync(path.join(root, 'sessions', id), { recursive: true });
     fs.writeFileSync(path.join(root, 'sessions', id, 'plan.md'), planRaw);
@@ -455,6 +456,7 @@ export class Teamwork {
               }
             });
             if (staleEvidence(taskEvidence)) throw new Error(`Integrity veto ${t.id}: validator changed assigned source files during verification`);
+            if(t.id.startsWith('diagnosis-')&&!recoveryDiagnosis(t.resultSummary||'',taskEvidence))throw new Error('Recovery diagnosis incomplete: cần đọc nguồn/cấu hình thật và báo cáo JSON rootCause, evidence, nextAction trước khi sửa. Checkpoint giữ nguyên; không tiếp tục sửa mù.');
             if (t.role === 'coder') {
               fingerprints[t.id] = dependencyFingerprints(t, this.tasks, scope);
               if (t.id.startsWith('repair-')) for (const dependency of t.dependencies) { const original = this.tasks.find(task => task.id === dependency); if (original?.role === 'coder') fingerprints[original.id] = dependencyFingerprints(original, this.tasks, scope); }
@@ -550,18 +552,18 @@ export class Teamwork {
         for(const failure of findings)for(const file of failure.repairFiles || []){const target=path.join(failure.task.worktreePath || this.c.workspace,file);try{sources[target]=crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex');}catch{sources[target]=null;}}
         const signature = repairSignature(findings, evidence, sources);
         repairFailures[signature] = (repairFailures[signature] || 0) + 1;
-        const stalled = repairFailures[signature] >= 3||measured.stop;
-        const repair = !this.abort.signal.aborted && !stalled && scheduleRepairs(this.tasks, findings, repairRounds + 1);
+        const recovery=chooseRecovery(recoveryCampaign,findings,evidence,signature);recoveryCampaign=recovery.campaign;
+        const repair = !this.abort.signal.aborted && recovery.strategy && scheduleRepairs(this.tasks, findings, repairRounds + 1,{strategy:recovery.strategy,instructions:recovery.instructions,history:recovery.campaign.history});
         if (!repair && !this.abort.signal.aborted) for (const {task} of findings) {
-          task.error += measured.stop ? '\nTự sửa đã dừng để tránh đốt token: 4 lần kiểm tra liên tiếp không giảm số task/kiểm tra/finding lỗi dù mã nguồn hoặc câu trả lời thay đổi. '+measured.message : stalled ? '\nTự sửa đã dừng: cùng lỗi và cùng mã nguồn lặp lại 3 lần, không có tiến triển.' : '\nTự sửa đã dừng: không xác định được tệp nguồn thuộc phạm vi sửa hoặc pipeline đã đạt giới hạn 48 tác vụ.';
+          task.error += '\nPhục hồi cần hỗ trợ: '+(!recovery.strategy?recovery.instructions:'Không có phạm vi tệp được phép sửa hoặc pipeline đã đạt giới hạn 48 tác vụ. Không tự mở rộng quyền ghi.')+' '+measured.message;
           emit({type:'agent_status',taskId:task.id,status:'failed',step:'recovery_stopped',message:task.error}); this.db.task(id,task);
         }
         if (repair) {
           repairRounds++;
           pipeline.repair(repairRounds, repair.id, findings.map(failure => `${failure.task.id}: ${failure.reason.slice(0, 500)}`));
           for (const task of this.tasks) { if (task.status === 'pending' && task.dependencies.includes(repair.id)) evidence.delete(task.id); this.db.task(id, task); }
-          log.emit('repair_scheduled', { round: repairRounds, repairId: repair.id, findings: findings.map(failure => ({ taskId: failure.task.id, reason: failure.reason })) });
-          emit({ type: 'agent_status', taskId: repair.id, status: 'pending', message: `Tự sửa vòng ${repairRounds}: gom ${findings.length} lỗi từ ${findings.map(failure => failure.task.id).join(', ')}; chạy lại toàn bộ tác vụ phụ thuộc bị ảnh hưởng.` });
+          log.emit('repair_scheduled', { round: repairRounds, repairId: repair.id, strategy:recovery.strategy, findings: findings.map(failure => ({ taskId: failure.task.id, reason: failure.reason })) });
+          emit({ type: 'agent_status', taskId: repair.id, status: 'pending', step:'recovery', message: `Phục hồi vòng ${repairRounds} · ${recovery.strategy}: ${recovery.strategy==='direct'?'sửa từ bằng chứng lỗi':'chẩn đoán chỉ đọc trước khi sửa'}; nhớ cách đã thất bại, kiểm tra lại tác vụ phụ thuộc.` });
         }
       }
       if (fatalError) { if (pool.size) { await Promise.all(pool.values()); continue; } throw fatalError; }

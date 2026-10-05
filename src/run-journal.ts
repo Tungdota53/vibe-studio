@@ -25,6 +25,7 @@ export class RunJournal {
   private archiveActive() { if (this.data.active) for (const record of this.data.active.tools) { const history = compact(record); this.data.history.push(history); if (history.mutating) this.effectSignatures.add(history.signature); } delete this.data.active; }
   private persist() { this.data.updatedAt = new Date().toISOString(); durableJson(this.file, this.data); }
   beginRun(state: ConversationState) { this.archiveActive(); this.data.state = structuredClone(state); this.data.status = 'running'; this.persist(); }
+  guardCompletedEffects(){this.resumeGuard=true;}
   saveState(state: ConversationState) { this.data.state = structuredClone(state); this.persist(); }
   beginBatch(answer: Message, state: ConversationState) { this.data.state = structuredClone(state); this.data.active = { answer: structuredClone(answer), tools: [] }; this.data.status = 'running'; this.persist(); }
   beginTool(call: ToolCall, mutating: boolean) {

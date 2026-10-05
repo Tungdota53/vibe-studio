@@ -7,6 +7,7 @@ import { loadConfig } from '../src/config.js';
 import { ModelRouter } from '../src/router.js';
 import { Tools } from '../src/tools.js';
 import { newConversation } from '../src/conversation.js';
+import { RunJournal } from '../src/run-journal.js';
 import type { ModelClient } from '../src/model.js';
 import type { Message } from '../src/types.js';
 const roots:string[]=[];
@@ -20,9 +21,17 @@ function setup(reply:(messages:Message[])=>any) {
 }
 const read=(name:string)=>({content:'',toolCalls:[{id:'read-'+name,type:'function',function:{name:'read_file',arguments:JSON.stringify({path:name})}}]});
 describe('Agent progress budgets',()=>{
+  it('rebuilds focused context and completes instead of failing at the unchanged-read threshold',async()=>{
+    let turns=0;const {root,agent,state}=setup(messages=>{turns++;if(messages.some(message=>message.content?.startsWith('Recovery refocus:')))return {content:'finished using existing evidence',toolCalls:[]};return read('input.txt');});fs.writeFileSync(path.join(root,'input.txt'),'retained fact');
+    expect(await agent.run('Implement',undefined,undefined,[],{state})).toBe('finished using existing evidence');expect(turns).toBe(7);expect(state.recoveryFocuses).toBe(1);expect(state.messages.some(message=>message.content?.includes('retained fact'))).toBe(true);
+  });
+  it('keeps the side-effect replay guard when rebuilding context',async()=>{
+    const write={content:'',toolCalls:[{id:'write',type:'function' as const,function:{name:'write_file',arguments:'{"path":"saved.txt","content":"saved"}'}}]};const {root,agent,state}=setup(messages=>messages.some(message=>message.content?.startsWith('Recovery refocus:'))||!messages.some(message=>message.role==='tool')?write:read('input.txt'));fs.writeFileSync(path.join(root,'input.txt'),'same');const journal=new RunJournal(root,'focus');
+    await expect(agent.run('Implement',undefined,undefined,[],{state,journal})).rejects.toThrow('Resume blocked replay');const record=JSON.parse(fs.readFileSync(path.join(root,'.vibe','run-journals',fs.readdirSync(path.join(root,'.vibe','run-journals'))[0]),'utf8'));expect(record.history.filter((tool:any)=>tool.name==='write_file')).toHaveLength(1);
+  });
   it('stops alternating unchanged reads instead of resetting on each different file',async()=>{
     let turns=0;const {root,agent}=setup(()=>read(turns++%2?'b.txt':'a.txt'));for(const file of ['a.txt','b.txt'])fs.writeFileSync(path.join(root,file),'same');
-    await expect(agent.run('Implement')).rejects.toThrow('xen kẽ');expect(turns).toBe(11);
+    await expect(agent.run('Implement')).rejects.toThrow('xen kẽ');expect(turns).toBe(22);
   });
   it('does not reset failing-tool protection when the agent writes another report',async()=>{
     let turns=0;const {agent}=setup(()=>turns++%2?{content:'',toolCalls:[{id:'report-'+turns,type:'function',function:{name:'write_report',arguments:JSON.stringify({path:'reports/attempt.json',content:JSON.stringify({attempt:turns})})}}]}:{content:'',toolCalls:[{id:'bad-'+turns,type:'function',function:{name:'missing_tool',arguments:'{}'}}]});
@@ -56,6 +65,6 @@ describe('Agent progress budgets',()=>{
     const {root,agent,state}=setup(()=>read('input.txt'));fs.writeFileSync(path.join(root,'input.txt'),'same');
     let checkpoint=0;
     await expect(agent.run('Implement',undefined,undefined,[],{state,checkpoint:()=>checkpoint++})).rejects.toThrow('không tiến triển');
-    expect(state.messages.filter(item=>item.role==='tool')).toHaveLength(6);expect(checkpoint).toBeGreaterThan(0);
+    expect(state.messages.filter(item=>item.role==='tool')).toHaveLength(6);expect(state.recoveryFocuses).toBe(1);expect(checkpoint).toBeGreaterThan(0);
   });
 });

@@ -32,17 +32,27 @@ function runner(root: string, plan: any[], reply: (messages: Message[]) => Promi
   return { team: new Teamwork(config, store, client, new ModelRouter(config), async () => false), store };
 }
 describe('Teamwork workspace mode', () => {
-  it('stops an unproductive repair campaign even when every repair changes source and failure wording',async()=>{
+  it('tries distinct recovery strategies before requesting help for an unresolved campaign',async()=>{
     const dir=root();let fixes=0;const command='node -e "process.exit(1)"';
     const {team}=runner(dir,[{id:'code',role:'coder',title:'Code',description:'create',expectedFiles:['a.txt']},{id:'test',role:'tester',title:'Verify',description:'verify',dependencies:['code'],verificationCommands:[command]}],async messages=>{
       const request=messages.findLast(message=>message.role==='user')?.content||'';
       if(!messages.some(message=>message.role==='tool')){if(request.startsWith('[REPAIR]'))fixes++;return {content:'',toolCalls:[{id:'call',type:'function',function:{name:request==='verify'?'run_command':request.startsWith('[REPAIR]')||request==='create'?'write_file':'read_file',arguments:JSON.stringify(request==='verify'?{command}:request.startsWith('[REPAIR]')||request==='create'?{path:'a.txt',content:'different source '+fixes}:{path:'a.txt'})}}]};}
-      return {content:request==='verify'?'failed wording '+fixes:request.startsWith('[REPAIR]')||request==='create'?'done':'{"verdict":"PASS","findings":[]}',toolCalls:[]};
+      return {content:request.startsWith('[RECOVERY DIAGNOSIS]')?'{"rootCause":"the recorded command always exits 1","evidence":["read a.txt and recorded command"],"nextAction":"try the assigned alternative without weakening required checks"}':request==='verify'?'failed wording '+fixes:request.startsWith('[REPAIR]')||request==='create'?'done':'{"verdict":"PASS","findings":[]}',toolCalls:[]};
     });
-    const result=await team.run('Avoid unproductive repair loop',()=>{});expect(result.gate.verdict).toBe('FAIL');expect(fixes).toBe(4);expect(result.tasks.find(task=>task.id==='test')?.error).toContain('tránh đốt token');
-    const saved=JSON.parse(fs.readFileSync(path.join(dir,'.vibe','sessions',result.id,'resume.json'),'utf8'));expect(saved.repairProgress.stagnant).toBe(4);expect(saved.repairProgress.observations).toBe(5);
-    expect(result.tasks.some(task=>task.id==='repair-5')).toBe(false);
-  });
+    const result=await team.run('Avoid unproductive repair loop',()=>{});expect(result.gate.verdict).toBe('FAIL');expect(fixes).toBe(8);expect(result.tasks.find(task=>task.id==='test')?.error).toContain('Phục hồi cần hỗ trợ');
+    const saved=JSON.parse(fs.readFileSync(path.join(dir,'.vibe','sessions',result.id,'resume.json'),'utf8'));expect(saved.repairProgress.stagnant).toBe(8);expect(saved.recoveryCampaign.history).toHaveLength(8);
+    expect(result.tasks.some(task=>task.id==='repair-9')).toBe(false);expect(result.tasks.filter(task=>task.id.startsWith('diagnosis-')&&task.status==='completed')).toHaveLength(6);
+  },20000);
+  it('recovers after the old four-round stop by using an inspected diagnosis and minimal reproduction',async()=>{
+    const dir=root();let fixes=0,diagnoses=0,sawDiagnosis=false;const command=`node -e "process.exit(require('fs').readFileSync('a.txt','utf8')==='good'?0:1)"`;
+    const {team}=runner(dir,[{id:'code',role:'coder',title:'Code',description:'create',expectedFiles:['a.txt']},{id:'test',role:'tester',title:'Verify',description:'verify',dependencies:['code'],verificationCommands:[command]}],async messages=>{
+      const request=messages.findLast(message=>message.role==='user')?.content||'',repair=request.startsWith('[REPAIR]'),diagnosis=request.startsWith('[RECOVERY DIAGNOSIS]');
+      if(!messages.some(message=>message.role==='tool')){if(repair){fixes++;if(request.includes('Recovery strategy: reproduce'))sawDiagnosis=messages.some(message=>message.role==='assistant'&&message.content?.includes('cause-from-current-source'));}if(diagnosis)diagnoses++;
+        return {content:'',toolCalls:[{id:'call',type:'function',function:{name:request==='verify'?'run_command':repair||request==='create'?'write_file':'read_file',arguments:JSON.stringify(request==='verify'?{command}:repair||request==='create'?{path:'a.txt',content:fixes>=5?'good':'bad'}:{path:'a.txt'})}}]};}
+      return {content:diagnosis?'{"rootCause":"cause-from-current-source","evidence":["read a.txt"],"nextAction":"reproduce value mismatch and correct assigned file"}':request==='verify'?'verified execution':repair||request==='create'?'done':'{"verdict":"PASS","findings":[]}',toolCalls:[]};
+    });
+    const result=await team.run('Adaptive recovery',()=>{});expect(result.gate.verdict).toBe('PASS');expect(fixes).toBe(5);expect(diagnoses).toBe(3);expect(sawDiagnosis).toBe(true);expect(fs.readFileSync(path.join(dir,'a.txt'),'utf8')).toBe('good');expect(result.tasks.find(task=>task.id==='test')?.status).toBe('completed');
+  },20000);
   it('accepts an adjustment during the final model response without creating another plan',async()=>{
     const dir=root();let release!:()=>void,started!:()=>void,calls=0;const waiting=new Promise<void>(resolve=>started=resolve),hold=new Promise<void>(resolve=>release=resolve);
     const {team}=runner(dir,[{id:'answer',title:'Answer',description:'original',role:'general'}],async messages=>{
@@ -98,19 +108,19 @@ describe('Teamwork workspace mode', () => {
           if(request==='create'||request.startsWith('[REPAIR]')){if(request.startsWith('[REPAIR]'))fixes++;return {content:'',toolCalls:[{id:'write',type:'function',function:{name:'write_file',arguments:JSON.stringify({path:'a.txt',content:'progress '+fixes})}}]};}
           return {content:'',toolCalls:[{id:'check',type:'function',function:{name:request==='verify'?'run_command':'read_file',arguments:JSON.stringify(request==='verify'?{command}:{path:'a.txt'})}}]};
         }
-        return {content:request==='review'?'{"verdict":"PASS","findings":[]}':'done',toolCalls:[]};
+        return {content:request.startsWith('[RECOVERY DIAGNOSIS]')?'{"rootCause":"read source differs from test expectation","evidence":["read a.txt"],"nextAction":"correct current source"}':request==='review'?'{"verdict":"PASS","findings":[]}':'done',toolCalls:[]};
       });
       const result=await team.run('Repair until correct',()=>{});expect(result.gate.verdict).toBe('PASS');expect(fixes).toBe(3);expect(result.tasks.find(t=>t.id==='repair-3')?.status).toBe('completed');
     }finally{vi.restoreAllMocks();}
   });
-  it('stops unchanged repeated repairs with a clear reason without weakening the failed test',async()=>{
+  it('requires an inspected diagnosis before another repair rather than accepting a bare report',async()=>{
     const dir=root(),command='node -e "process.exit(1)"';
     const {team}=runner(dir,[{id:'code',role:'coder',title:'Code',description:'create',expectedFiles:['a.txt']},{id:'test',role:'tester',title:'Verify',description:'verify',dependencies:['code'],verificationCommands:[command]}],async messages=>{
       const request=messages.findLast(m=>m.role==='user')?.content||'';
       if(!messages.some(m=>m.role==='tool'))return {content:'',toolCalls:[{id:'call',type:'function',function:{name:request==='verify'?'run_command':'write_file',arguments:JSON.stringify(request==='verify'?{command}:{path:'a.txt',content:'unchanged'})}}]};
       return {content:'done',toolCalls:[]};
     });
-    const result=await team.run('Try to repair',()=>{});expect(result.gate.verdict).toBe('FAIL');expect(result.tasks.filter(t=>/^repair-\d+$/.test(t.id))).toHaveLength(2);expect(result.tasks.find(t=>t.id==='test')?.error).toContain('không có tiến triển');
+    const result=await team.run('Try to repair',()=>{});expect(result.gate.verdict).toBe('FAIL');expect(result.tasks.filter(t=>/^repair-\d+$/.test(t.id))).toHaveLength(3);expect(result.tasks.find(t=>t.id.startsWith('diagnosis-'))?.error).toContain('Recovery diagnosis incomplete');
   });
 
   it('resumes a finished failed validator with fresh evidence while archiving the old attempt',async()=>{
@@ -415,7 +425,7 @@ describe('Teamwork workspace mode', () => {
         return {content:'',toolCalls:[{id:'call',type:'function',function:{name,arguments:JSON.stringify(args)}}]};
       }
       if(request==='review') await barrier;
-      return {content:request==='review'?'{"verdict":"PASS","findings":[]}':'done',toolCalls:[]};
+      return {content:request.startsWith('[RECOVERY DIAGNOSIS]')?'{"rootCause":"read source differs from test expectation","evidence":["read a.txt"],"nextAction":"correct current source"}':request==='review'?'{"verdict":"PASS","findings":[]}':'done',toolCalls:[]};
     });
     try{
       const result=await team.run('Repair concurrent verification',event=>{

@@ -1,6 +1,24 @@
 import crypto from 'node:crypto';
 import type { Task } from './types.js';
-import { isAdvisoryCommand, verificationEvidence, type TaskEvidence } from './team-artifacts.js';
+import { isAdvisoryCommand, advisoryCheck, latestChecks, verificationEvidence, type TaskEvidence } from './team-artifacts.js';
+export const recoveryStrategies=['direct','root_cause','reproduce','alternate'] as const;
+export type RecoveryStrategy=typeof recoveryStrategies[number];
+export interface RecoveryCampaign {key:string; attempts:Partial<Record<RecoveryStrategy,number>>; history:{strategy:RecoveryStrategy;signature:string;failures:string[]}[]}
+/** A new unresolved check set gets a new campaign. Source churn cannot reset it. */
+export function chooseRecovery(previous:RecoveryCampaign|undefined,failures:{task:Task;reason:string}[],evidence:Map<string,TaskEvidence>,signature:string){
+ const problems=failures.map(({task})=>({task:task.id,checks:latestChecks(evidence.get(task.id)||{inspected:false,successfulChecks:0,failedChecks:0,toolErrors:0}).filter(check=>check.exitCode!==0&&!advisoryCheck(check,task.verificationCommands)).map(check=>check.command.trim()).sort(),errors:[...new Set((evidence.get(task.id)?.executionErrors||[]).map(error=>error.command.trim()))].sort()})).sort((a,b)=>a.task.localeCompare(b.task));
+ const key=crypto.createHash('sha256').update(JSON.stringify(problems)).digest('hex');
+ const campaign:RecoveryCampaign=previous?.key===key?JSON.parse(JSON.stringify(previous)):{key,attempts:{},history:[]};
+ const strategy=recoveryStrategies.find(strategy=>(campaign.attempts[strategy]||0)<2);
+ if(!strategy)return {campaign,strategy:undefined,instructions:'Không tìm được cách phục hồi có bằng chứng mới sau khi đã thử sửa trực tiếp, chẩn đoán, tái hiện tối thiểu và triển khai thay thế. Cần thông tin hoặc môi trường bổ sung; giữ checkpoint.'};
+ campaign.attempts[strategy]=(campaign.attempts[strategy]||0)+1;
+ campaign.history.push({strategy,signature,failures:failures.map(({task,reason})=>`${task.id}: ${reason.slice(0,1800)}`)});campaign.history=campaign.history.slice(-8);
+ const instructions={direct:'Inspect the failing command output and relevant source before making the smallest justified fix.',root_cause:'Trace the failure to its root cause using source and project/runtime evidence. Distinguish application bugs from toolchain, environment and test-harness failures. Fix the cause rather than symptoms.',reproduce:'Create the smallest reproduction of the remaining failure using existing permitted tools and assigned files. Compare expected/actual behavior, test one hypothesis at a time, then fix only the proven cause.',alternate:'The previous approaches failed. Choose a materially different implementation or execution approach inside the existing scope. Preserve behavior and acceptance criteria; verify compatibility before replacing code.'}[strategy];
+ return {campaign,strategy,instructions};
+}
+export function recoveryDiagnosis(report:string,proof?:TaskEvidence){
+ try{const value=JSON.parse(report.replace(/^```(?:json)?\s*|\s*```$/g,''));if(!proof?.inspected||typeof value.rootCause!=='string'||!value.rootCause.trim()||!Array.isArray(value.evidence)||!value.evidence.length||typeof value.nextAction!=='string'||!value.nextAction.trim())return;return value;}catch{return;}
+}
 export function isDependencyAudit(command:string){return /^npm audit(?: --(?:json|omit=dev|production))*$/.test(command.trim());}
 export interface RepairProgress {bestTasks:number;bestChecks:number;bestFindings:number;stagnant:number;observations:number}
 /** Code churn, reworded reports and extra diagnostic commands do not count as recovery. */

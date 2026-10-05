@@ -10,6 +10,7 @@ export interface ContextPin { id: string; label: string; content: string; create
 export interface ContextAttachment extends ContextPin { path: string; sha256: string; bytes: number; redacted: boolean }
 
 export interface ConversationState {
+  recoveryFocuses?:number;
   version: 1;
   messages: Message[];
   summary: string;

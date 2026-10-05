@@ -38,9 +38,11 @@ Chat có các chế độ Hỏi, Lập kế hoạch, Triển khai, Kiểm chứn
 
 ## Bảo vệ khi tự sửa không tiến triển
 
-Hai lớp bảo vệ chạy độc lập: cùng lỗi/cùng nguồn lặp ba lần dừng như trước; thêm bộ đếm dừng sau bốn lần thẩm định liên tiếp không cải thiện số task, lệnh kiểm tra hoặc finding còn lỗi. Thay đổi hình thức mã và câu trả lời không đặt lại bộ đếm. Trạng thái được lưu trong resume.json cùng số lần retry mạng. Sửa có tiến triển đo được vẫn được tiếp tục; task và checkpoint đã hoàn tất được giữ khi dừng.
+App chuyển chiến lược cho tập kiểm tra còn lỗi: sửa trực tiếp, truy nguyên nhân, tái hiện tối thiểu và triển khai thay thế. Mỗi chiến lược có hai lượt để kiểm chứng giả thuyết; lịch sử lỗi và chiến lược lưu trong resume.json, đổi hash nguồn hay lời báo cáo không xóa lịch sử. Khi tập lỗi còn lại thay đổi, app tạo campaign mới. Bộ đếm không giảm lỗi phục vụ quan sát, không còn trực tiếp chặn sửa sau bốn vòng. Pipeline vẫn giữ giới hạn 48 task, ngân sách, quyền ghi và nghiệm thu thật.
 
-Trong một agent, lỗi công cụ lặp lại không được xóa bởi thao tác ghi báo cáo hoặc ghi source không thay đổi; đọc cùng dữ liệu xen kẽ các tệp khác cũng được phát hiện. Lỗi mất tiến độ không tự kích hoạt thêm task sửa.
+Trước các chiến lược nâng cao, một task survey chỉ đọc kiểm tra nguồn/cấu hình. Runtime yêu cầu có thao tác inspect thật cùng JSON rootCause/evidence/nextAction, rồi mới cho coder nhận báo cáo và sửa. Báo cáo chẩn đoán là giả thuyết, không thay bằng chứng test và reviewer. Thiếu chẩn đoán hợp lệ giữ checkpoint và yêu cầu thông tin cụ thể thay vì sửa mù.
+
+Trong một agent, vòng đọc lặp kích hoạt dựng lại context làm việc một lần từ các yêu cầu cùng tối đa 12 kết quả gần nhất. Lịch sử gốc vẫn có trong archive; ngân sách, role, pin và summary được giữ. Journal bật chống phát lại side effect đã chạy. Nếu context mới vẫn lặp, app giữ bằng chứng và báo cần điều chỉnh. Lỗi công cụ lặp không bị xóa bởi thao tác ghi báo cáo hoặc ghi source không đổi.
 
 Lệnh shell/test trong cùng workspace chia sẻ một hàng đợi để tránh build/test phá output của nhau. Agent không gọi model trong lúc đợi lease, và cancellation của một task đang chờ không giải phóng quyền của task đang chạy. Chỉ tiến trình do app sở hữu bị hủy khi timeout/cancel.
 
