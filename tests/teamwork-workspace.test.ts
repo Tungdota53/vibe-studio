@@ -22,8 +22,8 @@ async function repository(root: string) {
   await git(root, 'init'); fs.writeFileSync(path.join(root, 'existing.txt'), 'user source'); await git(root, 'add', 'existing.txt');
   await git(root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'initial');
 }
-function runner(root: string, plan: any[], reply: (messages: Message[]) => Promise<any>) {
-  const config = { ...loadConfig(root), namedAgents: [], maxAgents: 4, useWorktrees: true };
+function runner(root: string, plan: any[], reply: (messages: Message[]) => Promise<any>, teamManager=false) {
+  const config = { ...loadConfig(root), teamManager, namedAgents: [], maxAgents: 4, useWorktrees: true };
   const store = new Store(path.join(root, '.vibe')); stores.push(store); let first = true;
   const client = { config, chat: async (messages: Message[]) => {
     if (first) { first = false; return { content: JSON.stringify({ tasks: plan }), toolCalls: [] }; }
@@ -32,6 +32,22 @@ function runner(root: string, plan: any[], reply: (messages: Message[]) => Promi
   return { team: new Teamwork(config, store, client, new ModelRouter(config), async () => false), store };
 }
 describe('Teamwork workspace mode', () => {
+  it('pauses before manager dispatch without spinning, and resumes the same coordinator',async()=>{
+    const dir=root();let release!:()=>void,session='',managerCalls=0;const paused=new Promise<void>(resolve=>release=resolve);
+    const {team}=runner(dir,[{id:'answer',role:'general',title:'Answer',description:'answer'}],async messages=>{const request=messages.findLast(message=>message.role==='user')?.content||'';if(request.startsWith('[TEAM MANAGER]')){managerCalls++;return {content:'{"summary":"No additional agents needed","delegate":[]}',toolCalls:[]};}return {content:'done',toolCalls:[]};},true);
+    const work=team.run('Answer',event=>{if(typeof event==='string')return;if(event.type==='session_start')session=event.sessionId;if(event.type==='planner_done'){team.control(session,'pause');release();}});await paused;await new Promise(resolve=>setTimeout(resolve,60));expect(managerCalls).toBe(0);team.control(session,'resume');const result=await work;expect(result.tasks[0].status).toBe('completed');expect(managerCalls).toBe(2);
+  });
+  it('manager delegates missing validators, preserves the implementation and records its decisions',async()=>{
+    const dir=root();let managers=0,writes=0;const command=`node -e "process.exit(require('fs').readFileSync('a.txt','utf8')==='saved'?0:1)"`;
+    const {team}=runner(dir,[{id:'code',role:'coder',title:'Implementation',description:'create',expectedFiles:['a.txt'],acceptanceCriteria:['preserve value']}],async messages=>{
+      const request=messages.findLast(message=>message.role==='user')?.content||'';
+      if(request.startsWith('[TEAM MANAGER]'))return {content:JSON.stringify({summary:'Need independent verification and review',delegate:managers++===0?[{purpose:'testing',title:'Test',description:'verify',targets:['code'],verificationCommands:[command]},{purpose:'review',title:'Review',description:'review',targets:['code']}]:[]}),toolCalls:[]};
+      if(!messages.some(message=>message.role==='tool')){if(request==='create')writes++;return {content:'',toolCalls:[{id:'tool',type:'function',function:{name:request==='create'?'write_file':request==='verify'?'run_command':'read_file',arguments:JSON.stringify(request==='create'?{path:'a.txt',content:'saved'}:request==='verify'?{command}:{path:'a.txt'})}}]};}
+      return {content:request==='review'?'{"verdict":"PASS","findings":[]}':'done',toolCalls:[]};
+    },true);
+    const events:any[]=[],result=await team.run('Create value',event=>events.push(event));expect(result.gate.verdict).toBe('PASS');expect(writes).toBe(1);expect(managers).toBe(3);expect(result.tasks[0].acceptanceCriteria).toEqual(['preserve value']);expect(result.tasks.filter(task=>task.id.startsWith('managed-'))).toHaveLength(2);
+    expect(events.filter(event=>event.type==='planner_start')).toHaveLength(1);expect(events.some(event=>event.agentId==='agent-manager'&&event.role==='orchestrator')).toBe(true);const saved=JSON.parse(fs.readFileSync(path.join(dir,'.vibe','sessions',result.id,'resume.json'),'utf8'));expect(saved.manager.revision).toBe(3);expect(saved.manager.delegated).toHaveLength(2);
+  },20000);
   it('tries distinct recovery strategies before requesting help for an unresolved campaign',async()=>{
     const dir=root();let fixes=0;const command='node -e "process.exit(1)"';
     const {team}=runner(dir,[{id:'code',role:'coder',title:'Code',description:'create',expectedFiles:['a.txt']},{id:'test',role:'tester',title:'Verify',description:'verify',dependencies:['code'],verificationCommands:[command]}],async messages=>{

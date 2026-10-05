@@ -51,3 +51,11 @@ Thẩm định dùng lần hoàn tất mới nhất của cùng lệnh; lịch s
 ## Kiểm tra phát hành
 
 `npm run desktop:release:check` chạy build, toàn bộ test, Electron UI smoke, đóng gói Setup/Portable và kiểm tra EXE đã đóng gói. Nếu một bước lỗi, pipeline dừng trước phát hành. Script kiểm tra nguồn không đổi trong quá trình chạy, tạo checksum và `release/preflight.json`. Không tự upload hoặc thay đổi release GitHub.
+
+## Agent quản lý tự điều hành
+
+Bật mặc định trong Thiết lập agent; có thể tắt **Agent quản lý tự điều hành**. Một agent role orchestrator theo dõi kế hoạch hiện có ở các mốc giao/hoàn tất việc, dùng cùng cấu hình model hoặc model đã gán cho orchestrator. Nó phân công lại agent cho task chưa chạy, đề nghị ưu tiên và gọi thêm agent survey/test/review/security/audit/acceptance khi thiếu bằng chứng. Các worker độc lập vẫn chạy đồng thời theo slot; quản lý ra quyết định lúc batch không còn worker đang chạy.
+
+Quản lý không tạo quyền ghi mới, không sửa tiêu chí, không reset task hoàn tất và không tự nhận PASS. Tester chạy kiểm tra thật, reviewer đọc artifact; gate cuối giữ quyền nghiệm thu. Một đề xuất được kiểm tra toàn bộ trước khi thay đổi DAG. Không lặp cùng mục đích và nhánh triển khai bằng cách tạo chuỗi validator mới. Lỗi task được xử lý bởi pipeline phục hồi hiện có.
+
+Mỗi quyết định và phân công được giữ trong resume.json/pipeline.json và thư mục agents/agent-manager. Sơ đồ hiện Team Manager cùng model/trạng thái; ô quản lý không tính vào số task worker hoàn tất. Không gọi quản lý theo heartbeat hoặc khi trạng thái/bằng chứng không thay đổi. Nếu API hoặc đề xuất quản lý lỗi sau lần sửa định dạng, kế hoạch hiện có vẫn chạy, lỗi quản lý hiển thị riêng; app không cấp quyền hay tự công nhận coverage.

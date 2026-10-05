@@ -52,7 +52,7 @@ afterEach(async () => {
 async function harness(configuration: Record<string, unknown> = {}, prepare?: (root: string) => void) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-workbench-')); roots.push(root);
   fs.mkdirSync(path.join(root, '.vibe'));
-  fs.writeFileSync(path.join(root, '.vibe', 'config.json'), JSON.stringify({ namedAgents: [], contextMode: 'manual', ...configuration }));
+  fs.writeFileSync(path.join(root, '.vibe', 'config.json'), JSON.stringify({ namedAgents: [], teamManager:false, contextMode: 'manual', ...configuration }));
   const store = new Store(path.join(root, '.vibe'));
   store.session('chat-one', 'completed', 'test-model', 'Original task');
   store.session('chat-two', 'completed', 'test-model', 'Other task');

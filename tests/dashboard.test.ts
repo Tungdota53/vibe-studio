@@ -321,7 +321,7 @@ describe('Milestone M3: Live Dashboard & Non-TTY Fallback', () => {
       try {
         const baseConfig = loadConfig(tmpDir);
         const config: Config = {
-          ...baseConfig,
+          ...baseConfig, teamManager:false,
           workspace: tmpDir,
           maxAgents: 2,
           useWorktrees: false,
@@ -402,7 +402,7 @@ describe('Milestone M3: Live Dashboard & Non-TTY Fallback', () => {
       try {
         const baseConfig = loadConfig(tmpDir);
         const config: Config = {
-          ...baseConfig,
+          ...baseConfig, teamManager:false,
           workspace: tmpDir,
           maxAgents: 2,
           useWorktrees: false,

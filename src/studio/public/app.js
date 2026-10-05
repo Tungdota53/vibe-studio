@@ -283,7 +283,7 @@ function showSkills(skills) {
 }
 function showTeam(data) {
   TeamMap.configure(data, config?.model);
-  teamData = data; $('team-max').value = data.maxAgents; $('agent-iterations').value = data.maxAgentIterations ?? 0; $('agent-tools').value = data.maxAgentToolCalls ?? 0;
+  teamData = data; $('team-manager-enabled').checked = data.teamManager !== false; $('team-max').value = data.maxAgents; $('agent-iterations').value = data.maxAgentIterations ?? 0; $('agent-tools').value = data.maxAgentToolCalls ?? 0;
   showNamedAgents(data);
   const previousRole = $('role-picker').value || 'coder';
   $('role-picker').replaceChildren();
@@ -339,7 +339,7 @@ $('team-form').onsubmit = event => {
     instructions: card.querySelector('[data-field=instructions]').value,
     skills: [...card.querySelectorAll('[data-skill]:checked')].map(input => input.dataset.skill)
   }));
-  send({ type: 'configure_team', profiles, namedAgents, maxAgents: Number($('team-max').value), maxAgentIterations: Number($('agent-iterations').value), maxAgentToolCalls: Number($('agent-tools').value) });
+  send({ type: 'configure_team', teamManager: $('team-manager-enabled').checked, profiles, namedAgents, maxAgents: Number($('team-max').value), maxAgentIterations: Number($('agent-iterations').value), maxAgentToolCalls: Number($('agent-tools').value) });
 };
 function namedAgentCard(agent, data) {
   const card = document.createElement('details'); card.className = 'named-agent-card'; card.dataset.agent = agent.id;

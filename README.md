@@ -797,3 +797,7 @@ Kiểm chứng trước khi hoàn tất.**
 [**Tải Vibe Studio 1.0 →**](https://github.com/Tungdota53/cutty-studio/releases/tag/v1.0.0)
 
 [**Xem source code →**](https://github.com/Tungdota53/cutty-studio)
+
+## Team Manager
+
+Team Manager là agent Điều phối tự theo dõi kế hoạch hiện có, gán agent cho task chưa chạy, ưu tiên và gọi thêm agent kiểm chứng còn thiếu. Các worker độc lập vẫn chạy song song theo slot. Quyết định được lưu khi tiếp tục phiên; quản lý không thay quyền ghi, tiêu chí hay kết quả nghiệm thu. Có thể bật/tắt trong Thiết lập agent và đặt model/skill cho role Điều phối hoặc agent Team Manager.

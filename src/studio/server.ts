@@ -123,7 +123,7 @@ export async function startStudio(options?: number | StudioOptions): Promise<Stu
   const integrationSignature=(plan:any)=>JSON.stringify({project:plan.project,skills:plan.skills.slice(0,3).map((item:any)=>item.id),mcp:plan.mcp.map((item:any)=>item.id)});
   let integrationBusy=false;
   let integrationAbort:AbortController|undefined;
-  const teamConfig = () => ({ roles: roles.map(role => ({ id: role, ...roleCatalog[role], ...roleProfile(role, c) })), namedAgents: c.namedAgents || [], presets: defaultAgents, skills: skills.list().map(({ file, ...skill }) => skill), maxAgents: c.maxAgents, maxAgentIterations: c.maxAgentIterations ?? 0, maxAgentToolCalls: c.maxAgentToolCalls ?? 0 });
+  const teamConfig = () => ({ roles: roles.map(role => ({ id: role, ...roleCatalog[role], ...roleProfile(role, c) })), namedAgents: c.namedAgents || [], presets: defaultAgents, skills: skills.list().map(({ file, ...skill }) => skill), teamManager:c.teamManager!==false, maxAgents: c.maxAgents, maxAgentIterations: c.maxAgentIterations ?? 0, maxAgentToolCalls: c.maxAgentToolCalls ?? 0 });
   const token = typeof options === 'object' ? options.token : undefined;
 
   const clients = new Set<WebSocket>();
@@ -441,13 +441,13 @@ export async function startStudio(options?: number | StudioOptions): Promise<Stu
         } else if (msg.type === 'configure_team') {
           if (busy) throw new Error('Hãy dừng tác vụ trước khi đổi phân vai.');
           const data = teamSchema.parse(msg);
-          const next = { ...c, maxAgents: data.maxAgents ?? c.maxAgents, maxAgentIterations: data.maxAgentIterations ?? c.maxAgentIterations, maxAgentToolCalls: data.maxAgentToolCalls ?? c.maxAgentToolCalls, namedAgents: data.namedAgents ?? c.namedAgents, agentProfiles: { ...c.agentProfiles, ...data.profiles } };
+          const next = { ...c, teamManager:data.teamManager??c.teamManager, maxAgents: data.maxAgents ?? c.maxAgents, maxAgentIterations: data.maxAgentIterations ?? c.maxAgentIterations, maxAgentToolCalls: data.maxAgentToolCalls ?? c.maxAgentToolCalls, namedAgents: data.namedAgents ?? c.namedAgents, agentProfiles: { ...c.agentProfiles, ...data.profiles } };
             const available = skills.list();
             for (const role of roles) skills.select(role, '', next, [], available);
             for (const agent of next.namedAgents || []) skills.select(agent.role, '', next, agent.skills, available);
           const file = path.join(c.workspace, '.vibe', 'config.json');
           const saved = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
-          fs.writeFileSync(file, JSON.stringify({ ...saved, agentProfiles: next.agentProfiles, namedAgents: next.namedAgents, maxAgents: next.maxAgents, maxAgentIterations: next.maxAgentIterations, maxAgentToolCalls: next.maxAgentToolCalls }, null, 2));
+          fs.writeFileSync(file, JSON.stringify({ ...saved, teamManager:next.teamManager, agentProfiles: next.agentProfiles, namedAgents: next.namedAgents, maxAgents: next.maxAgents, maxAgentIterations: next.maxAgentIterations, maxAgentToolCalls: next.maxAgentToolCalls }, null, 2));
           c = next; client = new ModelClient(c); router = new ModelRouter(c);
           broadcast({ type: 'team_config', saved: true, ...teamConfig() });
         } else if (msg.type === 'get_models') {

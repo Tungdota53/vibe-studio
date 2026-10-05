@@ -56,6 +56,7 @@ const model = http.createServer((req, res) => {
       if (!['smoke-create-page','smoke-style-page'].includes(user)) assert(tools.some(tool => tool.content.includes('alo alo')));
       res.end('data: ' + JSON.stringify({ choices: [{ delta: { content: 'Verified smoke page' } }] }) + '\n\ndata: [DONE]\n\n'); return;
     }
+    if(user.startsWith('[TEAM MANAGER]')) { res.end('data: '+JSON.stringify({choices:[{delta:{content:JSON.stringify({summary:'Existing tester, reviewer and auditor provide necessary coverage',delegate:[]})}}]})+'\n\ndata: [DONE]\n\n'); return; }
     const text = requests.at(-1).tools ? 'Đã kiểm tra giao diện desktop.\n\n**Sẵn sàng làm việc.**\n\n```typescript\nconst studio = "Vibe";\n```' : 'Mục tiêu: kiểm tra desktop. Giữ kết quả đã xác nhận và tiếp tục từ lượt trước.';
     res.end('data: ' + JSON.stringify({ choices: [{ delta: { content: text } }] }) + '\n\ndata: ' + JSON.stringify({ choices: [], usage: { prompt_tokens: 351, completion_tokens: 24, total_tokens: 375, prompt_tokens_details: { cached_tokens: 123 } } }) + '\n\ndata: [DONE]\n\n');
   });
@@ -77,13 +78,13 @@ app.on('browser-window-created', (_, win) => {
       await new Promise(resolve => setTimeout(resolve, 350));
       fs.writeFileSync('release/preview.png', (await win.webContents.capturePage()).toPNG());
       await win.webContents.executeJavaScript(`document.getElementById('view-team').click();`);
-      await wait(win, `document.querySelectorAll('.roster-item').length===15 && !document.getElementById('map-empty').hidden`);
+      await wait(win, `document.querySelectorAll('.roster-item').length===16 && !document.getElementById('map-empty').hidden`);
       assert.equal(await win.webContents.executeJavaScript(`document.querySelectorAll('.agent-node').length`), 0);
       await win.webContents.executeJavaScript(`document.getElementById('map-back').click();`);
       const port = model.address().port;
       await win.webContents.executeJavaScript(`document.getElementById('team-button').click();`);
       await wait(win, `document.querySelectorAll('.role-card').length===7`);
-      assert.equal(await win.webContents.executeJavaScript(`document.querySelectorAll('.named-agent-card').length`), 15);
+      assert.equal(await win.webContents.executeJavaScript(`document.querySelectorAll('.named-agent-card').length`), 16);
       assert(await win.webContents.executeJavaScript(`!!document.querySelector('[data-agent=ui-ux] [data-field=model]') && !!document.querySelector('[data-agent=challenger]') && !!document.querySelector('[data-agent=auditor]')`));
       await win.webContents.executeJavaScript(`document.querySelector('[data-role=reviewer] [data-field=instructions]').value='Review authentication with evidence';document.getElementById('team-form').requestSubmit();`);
       await wait(win, `document.getElementById('team-status').textContent.includes('Đã lưu')`);
@@ -129,7 +130,7 @@ app.on('browser-window-created', (_, win) => {
       await win.webContents.executeJavaScript(`document.getElementById('new-chat').click();document.querySelector('#history button').click();`);
       await wait(win, `document.querySelectorAll('.message').length >= 2`);
       await win.webContents.executeJavaScript(`document.getElementById('mode').value='teamwork';document.getElementById('prompt').value='smoke-teamwork-page';document.getElementById('composer').requestSubmit();`);
-      await wait(win, `document.querySelectorAll('.fleet-card.running').length>=2 && document.querySelectorAll('.agent-node').length===5`);
+      await wait(win, `document.querySelectorAll('.fleet-card.running').length>=2 && document.querySelectorAll('.agent-node').length===6`);
       assert.equal(await win.webContents.executeJavaScript(`document.body.dataset.view`), 'chat');
       assert(await win.webContents.executeJavaScript(`document.querySelectorAll('.progress-row').length>0`));
       await win.webContents.executeJavaScript(`document.getElementById('view-team').click();`);
@@ -226,7 +227,7 @@ app.on('browser-window-created', (_, win) => {
       await win.webContents.executeJavaScript(`document.getElementById('integration-dialog').close()`);
       const bounds = await win.webContents.executeJavaScript(`({width:innerWidth, scroll:document.body.scrollWidth, node:typeof window.require, sidebar:!!document.getElementById('history').children.length})`);
       assert.equal(bounds.node, 'undefined'); assert(bounds.scroll <= bounds.width); assert(bounds.sidebar);
-      fs.writeFileSync('release/smoke-result.json', JSON.stringify({ ok: true, checks: ['planner repairs malformed output with retained context', 'desktop preload', 'encrypted settings', 'seven role profiles', 'fifteen specialized agents', 'teamwork executed check and independent review gate', 'saved role instructions and selected skills', 'skill search', 'skill instructions in model input', 'configurable token limits', 'chat streaming', 'previous output reused as input', 'actual input/output/cache usage', 'manual compaction', 'history restore', 'inspector', 'renderer isolation', 'two simultaneous model requests and live AI cards', 'live task DAG and dependencies', 'agent details and zoom geometry', 'renderer reconnect snapshot', 'persisted historical acceptance gate', 'reduced motion', 'responsive navigation', 'layout', 'workbench checkpoint diff and context pins', 'budget configuration with model prices', 'isolated web preview and console errors', 'automatic web file refresh'], bounds }, null, 2));
+      fs.writeFileSync('release/smoke-result.json', JSON.stringify({ ok: true, checks: ['planner repairs malformed output with retained context', 'desktop preload', 'encrypted settings', 'seven role profiles', 'sixteen specialized agents including manager', 'teamwork executed check and independent review gate', 'saved role instructions and selected skills', 'skill search', 'skill instructions in model input', 'configurable token limits', 'chat streaming', 'previous output reused as input', 'actual input/output/cache usage', 'manual compaction', 'history restore', 'inspector', 'renderer isolation', 'two simultaneous model requests and live AI cards', 'live task DAG and dependencies', 'agent details and zoom geometry', 'renderer reconnect snapshot', 'persisted historical acceptance gate', 'reduced motion', 'responsive navigation', 'layout', 'workbench checkpoint diff and context pins', 'budget configuration with model prices', 'isolated web preview and console errors', 'automatic web file refresh'], bounds }, null, 2));
       clearTimeout(timer); model.close(); app.quit();
     } catch (error) { fs.writeFileSync('release/smoke-result.json', JSON.stringify({ ok: false, error: String(error) })); clearTimeout(timer); model.close(); app.exit(1); }
   });

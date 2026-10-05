@@ -8,6 +8,7 @@ import { mcpServersSchema, type McpServersConfig } from './mcp.js';
 import { runBudgetSchema, modelRatesSchema, type RunBudget, type ModelRates } from './budgets.js';
 const Pool = z.object({ id: z.string(), tags: z.array(z.string()).default([]), priority: z.number().default(50), maxContext: z.number().optional(), estimatedLatencyClass: z.enum(['fast', 'medium', 'slow']).optional(), estimatedCostClass: z.enum(['low', 'medium', 'high']).optional() });
 const FileConfig = z.object({
+  teamManager: z.boolean().optional(),
   autoIntegrations: z.boolean().optional(),
   runBudget: runBudgetSchema.optional(), modelRates: modelRatesSchema.optional(),
   mcpServers: mcpServersSchema.optional(),
@@ -23,6 +24,7 @@ const FileConfig = z.object({
 }).passthrough();
 export type ModelCandidate = z.infer<typeof Pool>;
 export interface Config {
+  teamManager?:boolean;
   autoIntegrations?: boolean;
   runBudget?: RunBudget; modelRates?: ModelRates;
   mcpServers?: McpServersConfig;
@@ -47,6 +49,7 @@ export function loadConfig(workspace = process.env.VIBE_WORKSPACE || process.cwd
   const configuredWindow = Number(process.env.VIBE_CONTEXT_WINDOW || merged.contextWindow || 1000000);
   const contextWindow = !process.env.VIBE_CONTEXT_WINDOW && contextMode === 'auto' && configuredWindow <= 131072 ? 1000000 : configuredWindow;
   return {
+    teamManager:merged.teamManager??true,
     autoIntegrations: process.env.VIBE_AUTO_INTEGRATIONS==='0'?false:merged.autoIntegrations ?? true,
     mcpServers: merged.mcpServers || {}, runBudget: merged.runBudget, modelRates: merged.modelRates,
     baseUrl: (process.env.VIBE_BASE_URL || 'https://9router.tungdota.io.vn/v1').replace(/\/$/, ''), apiKey: process.env.VIBE_API_KEY || '',

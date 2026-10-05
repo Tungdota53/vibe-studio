@@ -24,6 +24,8 @@ export function inspectPlan(tasks: Task[]): PlanDiagnostic[] {
 
 /** Per-run observability. Checkpoints describe state, never imply automatic replay. */
 export class Pipeline {
+  private manager?:unknown;
+  setManager(manager:unknown){this.manager=manager;}
   private started = Date.now();
   private sequence = 0;
   private peak = 0;
@@ -44,7 +46,7 @@ export class Pipeline {
       successfulChecks: summaries.reduce((sum, proof) => sum + proof.successfulChecks, 0),
       failedChecks: summaries.reduce((sum, proof) => sum + proof.failedChecks, 0),
       environmentWarnings: summaries.reduce((sum, proof) => sum + proof.warnings, 0),
-      repairs: this.repairs, diagnostics: inspectPlan(tasks), execution: executionDiagnosis(tasks), gate,
+      repairs: this.repairs, diagnostics: inspectPlan(tasks), execution: executionDiagnosis(tasks), gate, manager:this.manager,
       tasks: tasks.map(task => {
         const proof = evidence.get(task.id);
         return {
