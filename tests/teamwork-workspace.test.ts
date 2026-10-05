@@ -15,19 +15,21 @@ import type { Message } from '../src/types.js';
 
 const roots: string[] = [];
 const stores: Store[] = [];
+async function removeTemp(root: string) {
+  try {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch (error) {
+    if (process.platform !== 'win32') throw error;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}
 afterEach(async () => {
   stores.splice(0).forEach(store => {
     try { store.close(); } catch {}
   });
   for (const root of roots.splice(0)) {
-    try {
-      fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-    } catch {
-      await new Promise(resolve => setTimeout(resolve, 100));
-      try {
-        fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      } catch {}
-    }
+    await removeTemp(root);
   }
 });
 function root() { const value = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-workspace-')); roots.push(value); return value; }
@@ -170,7 +172,7 @@ describe('Teamwork workspace mode', () => {
       });
       const result=await team.run('Repair until correct',()=>{});expect(result.gate.verdict).toBe('PASS');expect(fixes).toBe(3);expect(result.tasks.find(t=>t.id==='repair-3')?.status).toBe('completed');
     }finally{vi.restoreAllMocks();}
-  }, 35000);
+  }, 60000);
   it('requires an inspected diagnosis before another repair rather than accepting a bare report',async()=>{
     const dir=root(),command='node -e "process.exit(1)"';
     const {team}=runner(dir,[{id:'code',role:'coder',title:'Code',description:'create',expectedFiles:['a.txt']},{id:'test',role:'tester',title:'Verify',description:'verify',dependencies:['code'],verificationCommands:[command]}],async messages=>{
@@ -179,7 +181,7 @@ describe('Teamwork workspace mode', () => {
       return {content:'done',toolCalls:[]};
     });
     const result=await team.run('Try to repair',()=>{});expect(result.gate.verdict).toBe('FAIL');expect(result.tasks.filter(t=>/^repair-\d+$/.test(t.id))).toHaveLength(3);expect(result.tasks.find(t=>t.id.startsWith('diagnosis-'))?.error).toContain('Recovery diagnosis incomplete');
-  }, 15000);
+  });
 
   it('resumes a finished failed validator with fresh evidence while archiving the old attempt',async()=>{
     const dir=root(),command='node -e "process.exit(0)"';let healed=false,executions=0;

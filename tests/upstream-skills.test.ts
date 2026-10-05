@@ -5,9 +5,20 @@ import path from 'node:path';
 import { SkillLibrary } from '../src/skills.js';
 import { recommendationScore } from '../src/skill-routing.js';
 
+async function removeTemp(root: string) {
+  try {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch (error) {
+    if (process.platform !== 'win32') throw error;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}
 const roots: string[] = [];
 function workspace() { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-upstream-skills-')); roots.push(dir); return dir; }
-afterEach(() => roots.splice(0).forEach(dir => { try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} }));
+afterEach(async () => {
+  for (const dir of roots.splice(0)) await removeTemp(dir);
+});
 describe('Reviewed upstream skill adapters', () => {
   it('retains exact source commits, MIT licenses, adapter attribution and verified references', () => {
     const library = new SkillLibrary(workspace());

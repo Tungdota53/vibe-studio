@@ -4,7 +4,20 @@ import {ProjectIntegrations,projectSignals} from '../src/project-integrations.js
 import {SkillLibrary} from '../src/skills.js';import {loadConfig} from '../src/config.js';import {McpRegistry} from '../src/mcp.js';
 import {execaCommand} from 'execa';
 vi.mock('execa',()=>({execaCommand:vi.fn()}));
-const roots:string[]=[];afterEach(()=>{vi.restoreAllMocks();for(const root of roots.splice(0)){try{fs.rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:100});}catch{}}});
+async function removeTemp(root: string) {
+  try {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch (error) {
+    if (process.platform !== 'win32') throw error;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}
+const roots: string[] = [];
+afterEach(async () => {
+  vi.restoreAllMocks();
+  for (const root of roots.splice(0)) await removeTemp(root);
+});
 function project(web=false){const root=fs.mkdtempSync(path.join(os.tmpdir(),'vibe-auto-'));roots.push(root);if(web)fs.writeFileSync(path.join(root,'package.json'),JSON.stringify({dependencies:{react:'1',vite:'1'}}));return root;}
 function fixture(root:string){const library=new SkillLibrary(root);const sources=library.list().filter(s=>s.source==='github');return vi.fn(async(url:string)=>{const parsed=new URL(url),relative=decodeURIComponent(parsed.pathname.slice(1));for(const skill of sources){const m=JSON.parse(fs.readFileSync(path.join(path.dirname(skill.file),'.provenance.json'),'utf8')),prefix=`${m.repository}/${m.commit}/`;if(!relative.startsWith(prefix))continue;const file=relative.slice(prefix.length);const name=file.startsWith(m.path+'/')?file.slice(m.path.length+1):file==='LICENSE'||file==='LICENSE.txt'?'LICENSE.txt':'';if(name&&m.files[name])return fs.readFileSync(path.join(path.dirname(skill.file),name));}throw new Error('Unknown source')});}
 describe('Automatic project integrations',()=>{

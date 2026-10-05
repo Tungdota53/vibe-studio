@@ -13,8 +13,19 @@ import { loadConfig } from '../src/config.js';
 import { parseTeamPlan } from '../src/teamwork.js';
 import type { Message } from '../src/types.js';
 
+async function removeTemp(root: string) {
+  try {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch (error) {
+    if (process.platform !== 'win32') throw error;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}
 const roots: string[] = [];
-afterEach(() => roots.splice(0).forEach(root => { try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} }));
+afterEach(async () => {
+  for (const root of roots.splice(0)) await removeTemp(root);
+});
 function root() { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-role-')); roots.push(dir); return dir; }
 function skill(dir: string, name: string, description: string, body = 'Read the relevant code before editing.') {
   const folder = path.join(dir, '.agents', 'skills', name); fs.mkdirSync(folder, { recursive: true });

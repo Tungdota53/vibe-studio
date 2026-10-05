@@ -9,10 +9,19 @@ import { startStudio, type StudioServerInstance } from '../src/studio/server.js'
 const servers: StudioServerInstance[] = [];
 const roots: string[] = [];
 const sockets: WebSocket[] = [];
+async function removeTemp(root: string) {
+  try {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch (error) {
+    if (process.platform !== 'win32') throw error;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}
 afterEach(async () => {
   sockets.splice(0).forEach(socket => socket.terminate());
   await Promise.all(servers.splice(0).map(server => server.close()));
-  roots.splice(0).forEach(root => { try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} });
+  for (const root of roots.splice(0)) await removeTemp(root);
 });
 async function studio(token?: string) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-desktop-')); roots.push(root);
