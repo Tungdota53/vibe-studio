@@ -2,6 +2,7 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { SkillLibrary } from '../src/skills.js';
 import { assignedAgent, teamSchema } from '../src/roles.js';
 import { Tools } from '../src/tools.js';
@@ -20,6 +21,31 @@ function skill(dir: string, name: string, description: string, body = 'Read the 
   fs.writeFileSync(path.join(folder, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description}\n---\n${body}`); return folder;
 }
 describe('Role permissions and skill loading', () => {
+  it('resolves verified installed copies to one canonical skill and loads each bundle only once', () => {
+    const dir = root(), copy = path.join(dir, '.vibe/skills/auto/trailofbits/audit-context-building');
+    fs.cpSync('src/vendor-skills/trailofbits/audit-context-building', copy, { recursive: true });
+    const lib = new SkillLibrary(dir, path.join(dir, 'absent'));
+    expect(lib.load('audit-context-building').id).toBe('github:trailofbits/audit-context-building');
+    const selected = lib.select('planner', 'audit-context-building audit khảo sát', { agentProfiles: { planner: { skills: ['workspace:auto/trailofbits/audit-context-building'], autoSkills: true } } }, ['audit-context-building', 'github:trailofbits/audit-context-building']);
+    expect(selected.filter(item => item.name === 'audit-context-building')).toHaveLength(1);
+    expect(lib.resource('audit-context-building', 'SKILL.md', 1, 5)).toContain('audit-context-building');
+  });
+  it('does not conflate local namesakes, modified bundles or copies with invalid checksums', () => {
+    const dir = root(), copy = path.join(dir, '.vibe/skills/auto/trailofbits/audit-context-building');
+    fs.cpSync('src/vendor-skills/trailofbits/audit-context-building', copy, { recursive: true });
+    const lib = new SkillLibrary(dir, path.join(dir, 'absent'));
+    fs.appendFileSync(path.join(copy, 'SKILL.md'), '\nChanged instructions');
+    expect(() => lib.load('audit-context-building')).toThrow('Các ID:');
+    expect(() => lib.load('workspace:auto/trailofbits/audit-context-building')).toThrow('checksum');
+    const manifest = JSON.parse(fs.readFileSync(path.join(copy, '.provenance.json'), 'utf8'));
+    manifest.files['SKILL.md'] = crypto.createHash('sha256').update(fs.readFileSync(path.join(copy, 'SKILL.md'))).digest('hex');
+    fs.writeFileSync(path.join(copy, '.provenance.json'), JSON.stringify(manifest));
+    expect(lib.load('workspace:auto/trailofbits/audit-context-building').provenance?.integrity).toBe(true);
+    expect(() => lib.load('audit-context-building')).toThrow('trùng tên');
+    skill(dir, 'audit-context-building', 'Unrelated local instructions');
+    expect(() => lib.load('audit-context-building')).toThrow('project:audit-context-building');
+    expect(lib.load('github:trailofbits/audit-context-building').provenance?.integrity).toBe(true);
+  });
   it('loads 38 GitHub skills with pinned provenance and paginated references', () => {
     const lib = new SkillLibrary(root()); const external = lib.list().filter(skill => skill.source === 'github');
     expect(external).toHaveLength(38);

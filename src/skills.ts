@@ -9,7 +9,13 @@ import { safePath, isSensitivePath } from './security.js';
 import crypto from 'node:crypto';
 import { recommendationScore, skillRoutes } from './skill-routing.js';
 
-export interface Skill { id: string; name: string; description: string; source: string; file: string; recommendedRoles?: Role[]; requires?: string[]; provenance?: { repository: string; commit: string; license: string; url: string; integrity: boolean; adaptation?: string; sourcePaths?: string[] } }
+export interface Skill { id: string; name: string; description: string; source: string; file: string; recommendedRoles?: Role[]; requires?: string[]; provenance?: { repository: string; commit: string; license: string; url: string; integrity: boolean; bundleDigest?: string; adaptation?: string; sourcePaths?: string[] } }
+// Copies are equivalent only after every manifest file has been verified. A
+// matching name or upstream URL alone cannot identify a local instruction set.
+function sameBundle(a: Skill, b: Skill) {
+  const x = a.provenance, y = b.provenance;
+  return Boolean(x?.integrity && y?.integrity && x.bundleDigest && x.bundleDigest === y.bundleDigest);
+}
 // Bundled builds place the same assets next to desktop-host.mjs.
 const bundled = path.join(path.dirname(fileURLToPath(import.meta.url)), 'skills');
 export class SkillLibrary {
@@ -41,7 +47,8 @@ export class SkillLibrary {
                 if (source === 'github' || (source === 'workspace' && id.startsWith('workspace:auto/'))) {
                   const manifest = JSON.parse(fs.readFileSync(path.join(folder, '.provenance.json'), 'utf8'));
                   const integrity = Boolean(manifest.files?.['SKILL.md'] && manifest.files?.['LICENSE.txt']) && Object.entries(manifest.files as Record<string, string>).every(([name, expected]) => crypto.createHash('sha256').update(fs.readFileSync(safePath(folder, name))).digest('hex') === expected);
-                  provenance = { repository: manifest.repository, commit: manifest.commit, license: manifest.license, url: manifest.url, integrity, ...(typeof manifest.adaptation === 'string' ? { adaptation: manifest.adaptation } : {}), ...(Array.isArray(manifest.sourcePaths) && manifest.sourcePaths.every((item: unknown) => typeof item === 'string') ? { sourcePaths: manifest.sourcePaths } : {}) };
+                  const bundleDigest = crypto.createHash('sha256').update(JSON.stringify({ repository: manifest.repository, commit: manifest.commit, license: manifest.license, url: manifest.url, adaptation: manifest.adaptation, sourcePaths: manifest.sourcePaths, files: Object.entries(manifest.files).sort(([a], [b]) => a.localeCompare(b)) })).digest('hex');
+                  provenance = { repository: manifest.repository, commit: manifest.commit, license: manifest.license, url: manifest.url, integrity, bundleDigest, ...(typeof manifest.adaptation === 'string' ? { adaptation: manifest.adaptation } : {}), ...(Array.isArray(manifest.sourcePaths) && manifest.sourcePaths.every((item: unknown) => typeof item === 'string') ? { sourcePaths: manifest.sourcePaths } : {}) };
                 }
                 result.push({ id, name: field('name') || item.name, description: (field('description') || '').slice(0, 1200), source, file, provenance, recommendedRoles: skillRoutes[id]?.roles, requires: skillRoutes[id]?.requires });
               } catch { /* Skip invalid or escaped skill paths. */ }
@@ -57,7 +64,11 @@ export class SkillLibrary {
     const exact = list.find(skill => skill.id === id);
     if (exact) return exact;
     const named = list.filter(skill => skill.name === id);
-    if (named.length !== 1) throw new Error(named.length ? `Skill trùng tên; dùng ID đầy đủ: ${id}` : `Không tìm thấy skill: ${id}`);
+    if (named.length > 1 && named.every(skill => sameBundle(skill, named[0]))) {
+      // Prefer the bundled ID so saved plans do not depend on a copied folder.
+      return named.find(skill => skill.source === 'github') || named.slice().sort((a, b) => a.id.localeCompare(b.id))[0];
+    }
+    if (named.length !== 1) throw new Error(named.length ? `Skill trùng tên; dùng ID đầy đủ: ${id}. Các ID: ${named.map(skill => skill.id).join(', ')}` : `Không tìm thấy skill: ${id}`);
     return named[0];
   }
   load(id: string, catalog?: Skill[]) {
@@ -93,7 +104,7 @@ export class SkillLibrary {
   }
   select(role: Role, task: string, config?: Partial<Config>, explicit: string[] = [], catalog = this.list()) {
     const profile = roleProfile(role, config);
-    const selected = [...new Set([...profile.skills, ...explicit])].map(id => this.load(id, catalog)).filter((skill,index,list)=>!list.slice(0,index).some(prior=>skill.provenance&&prior.provenance?.url===skill.provenance.url&&prior.provenance.commit===skill.provenance.commit));
+    const selected = [...new Set([...profile.skills, ...explicit])].map(id => this.load(id, catalog)).filter((skill,index,list)=>!list.slice(0,index).some(prior=>prior.id === skill.id || sameBundle(prior, skill)));
     // Add relevant, pinned role recommendations without overflowing the prompt budget.
     if (profile.autoSkills) {
       const recommended = catalog.map(skill => ({ skill, score: recommendationScore(skill.id, role, task) }))
@@ -101,7 +112,7 @@ export class SkillLibrary {
       let added = 0;
       for (const { skill } of recommended) {
         if (added >= 2 || selected.length >= 8) break;
-        if (selected.some(item => item.id === skill.id)) continue;
+        if (selected.some(item => item.id === skill.id || sameBundle(item, skill))) continue;
         const loaded = this.load(skill.id, catalog);
         if (selected.reduce((n, item) => n + item.instructions.length, 0) + loaded.instructions.length > 24000) continue;
         selected.push(loaded); added++;
@@ -110,7 +121,7 @@ export class SkillLibrary {
     // User/system skills still require explicit selection.
     if (profile.autoSkills) for (const skill of this.search(task, catalog).filter(skill => ['project', 'workspace'].includes(skill.source) && skill.score >= 3)) {
       if (selected.length >= 4) break;
-      if (!selected.some(item => item.id === skill.id)) {
+      if (!selected.some(item => item.id === skill.id || sameBundle(item, skill))) {
         const loaded = this.load(skill.id, catalog);
         if (selected.reduce((n, item) => n + item.instructions.length, 0) + loaded.instructions.length <= 24000) selected.push(loaded);
       }

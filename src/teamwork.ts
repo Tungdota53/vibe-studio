@@ -252,7 +252,11 @@ export class Teamwork {
         return output;
       }, raw => {
         const tasks = this.parsePlan(raw);
-        for (const task of tasks) assignedAgent(this.c, task.agentId, task.role);
+        const catalog = library.list();
+        for (const task of tasks) {
+          assignedAgent(this.c, task.agentId, task.role);
+          task.skills = [...new Set((task.skills || []).map(skill => library.load(skill, catalog).id))];
+        }
         return tasks;
       }, this.abort.signal, (attempt, reason) => emit({ type: 'agent_status', agentId: plannerId, role: 'planner', status: 'running', step: 'plan_repair', message: `Planner đang sửa kế hoạch (${attempt}/2): ${reason}` }));
       planRaw = planned.raw;

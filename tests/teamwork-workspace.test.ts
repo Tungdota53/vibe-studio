@@ -32,6 +32,34 @@ function runner(root: string, plan: any[], reply: (messages: Message[]) => Promi
   return { team: new Teamwork(config, store, client, new ModelRouter(config), async () => false), store };
 }
 describe('Teamwork workspace mode', () => {
+  it('canonicalizes copied skill aliases and resumes a legacy blocked DAG without replanning', async () => {
+    const dir = root(); fs.writeFileSync(path.join(dir, 'existing.txt'), 'source');
+    fs.cpSync('src/vendor-skills/trailofbits/audit-context-building', path.join(dir, '.vibe/skills/auto/trailofbits/audit-context-building'), { recursive: true });
+    let independentCalls = 0;
+    const { team } = runner(dir, [
+      { id: 'T1', role: 'planner', title: 'Survey', description: 'inspect', skills: ['audit-context-building'] },
+      { id: 'T2', role: 'general', title: 'Independent', description: 'independent' },
+      { id: 'T3', role: 'general', title: 'Consume', description: 'consume', dependencies: ['T1'] }
+    ], async messages => {
+      const request = messages.findLast(message => message.role === 'user')?.content || '';
+      if (request === 'independent') independentCalls++;
+      if (request === 'inspect' && !messages.some(message => message.role === 'tool')) return { content: '', toolCalls: [{ id: 'read', type: 'function', function: { name: 'read_file', arguments: '{"path":"existing.txt"}' } }] };
+      return { content: 'Actual source inspected', toolCalls: [] };
+    });
+    const first = await team.run('Survey existing source', () => {});
+    expect(first.tasks.every(task => task.status === 'completed')).toBe(true);
+    expect(first.tasks[0].skills).toEqual(['github:trailofbits/audit-context-building']);
+    const file = path.join(dir, '.vibe/sessions', first.id, 'resume.json');
+    const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+    saved.status = 'failed'; saved.tasks[0].status = 'failed'; saved.tasks[0].skills = ['audit-context-building'];
+    saved.tasks[0].error = 'Error: Skill trùng tên; dùng ID đầy đủ: audit-context-building';
+    saved.tasks[2].status = 'blocked'; fs.writeFileSync(file, JSON.stringify(saved));
+    const events: any[] = [], second = await team.resume(first.id, event => events.push(event));
+    expect(second.tasks.every(task => task.status === 'completed')).toBe(true);
+    expect(independentCalls).toBe(1);
+    expect(events.some(event => event.type === 'planner_start')).toBe(false);
+    expect(fs.readFileSync(path.join(dir, 'existing.txt'), 'utf8')).toBe('source');
+  });
   it('pauses before manager dispatch without spinning, and resumes the same coordinator',async()=>{
     const dir=root();let release!:()=>void,session='',managerCalls=0;const paused=new Promise<void>(resolve=>release=resolve);
     const {team}=runner(dir,[{id:'answer',role:'general',title:'Answer',description:'answer'}],async messages=>{const request=messages.findLast(message=>message.role==='user')?.content||'';if(request.startsWith('[TEAM MANAGER]')){managerCalls++;return {content:'{"summary":"No additional agents needed","delegate":[]}',toolCalls:[]};}return {content:'done',toolCalls:[]};},true);
