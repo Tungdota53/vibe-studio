@@ -1,3 +1,4 @@
+import { BackgroundProcesses } from './background-processes.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -675,7 +676,7 @@ export class Teamwork {
       emit({ type: 'task_snapshot', sessionId: id, pipeline: finalPipeline, maxAgents: this.c.maxAgents, tasks: this.tasks.map(task => ({ ...task, phase: taskPhase(task) })), timestamp: new Date().toISOString() });
       emit({ type: 'session_end', sessionId: id, status, pipeline: finalPipeline, message: String(error), gate: { verdict: 'FAIL', reasons: [String(error)] }, timestamp: new Date().toISOString() });
       throw error;
-    }
+    } finally { await BackgroundProcesses.forWorkspace(this.c.workspace).stopSession(id); }
   }
 }
 

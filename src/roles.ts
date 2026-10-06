@@ -27,9 +27,9 @@ export function roleProfile(role: Role, config?: Partial<Config>): RoleProfile {
   return profileSchema.parse({ instructions: '', autoSkills: true, model: '', skills: [`builtin:${roleCatalog[role].skill}`], ...config?.agentProfiles?.[role] });
 }
 export function canUseTool(role: Role, name: string, readOnlyTask = false) {
-  if (readOnlyTask && ['write_file', 'edit_file', 'run_command', 'run_tests'].includes(name)) return false;
+  if (readOnlyTask && ['write_file', 'edit_file', 'run_command', 'run_tests', 'start_background', 'stop_background'].includes(name)) return false;
   if (['write_file', 'edit_file'].includes(name)) return role === 'coder' || role === 'general';
-  if (['run_command', 'run_tests'].includes(name)) return !roleCatalog[role].readOnly;
+  if (['run_command', 'run_tests', 'start_background', 'stop_background'].includes(name)) return !roleCatalog[role].readOnly;
   return true;
 }
 export function assignedAgent(config: Partial<Config>, id: string | undefined, role: Role) {

@@ -1,5 +1,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { BackgroundProcesses } from '../background-processes.js';
+import { isDestructive, safePath } from '../security.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -128,6 +130,8 @@ export async function startStudio(options?: number | StudioOptions): Promise<Stu
   const token = typeof options === 'object' ? options.token : undefined;
 
   const clients = new Set<WebSocket>();
+  const background=BackgroundProcesses.forWorkspace(c.workspace);
+  const unwatchBackground=background.subscribe(()=>broadcast({type:'background_state',processes:background.list()}));
 
   function broadcast(data: any) {
     const payload = JSON.stringify(data);
@@ -392,6 +396,16 @@ export async function startStudio(options?: number | StudioOptions): Promise<Stu
           if(msg.type==='integrate_worktree'){if(busy||integrationBusy)throw new Error('Đợi phiên hoàn tất trước khi tích hợp');ws.send(JSON.stringify({type:'integration_result',sessionId,...operations.integrate(sessionId)}));return;}
           const state=sessionId.startsWith('session-')?operations.inspect(sessionId):{sessionId,memory:operations.listMemory(),tasks:[],events:[],recovery:[]};
           ws.send(JSON.stringify({type:'operations_state',...state,isolated:c.useWorktrees,skills:skills.list().map(({file,...skill})=>skill)}));return;
+        }
+        if (['get_background','start_background','stop_background','background_health'].includes(msg.type)) {
+          if(msg.type==='start_background'){
+            if(busy)throw new Error('Đợi agent hoàn tất trước khi chạy lệnh thủ công');
+            const command=String(msg.command||'');if(isDestructive(command))throw new Error('Lệnh phá hủy không được chạy từ bảng tác vụ nền');
+            await background.start({command,cwd:safePath(c.workspace,String(msg.cwd||'.')),owner:'manual',label:String(msg.label||'Tác vụ thủ công')});
+          }
+          if(msg.type==='stop_background')await background.stop(String(msg.id));
+          if(msg.type==='background_health'){ws.send(JSON.stringify({type:'background_health',...await background.health(String(msg.id),String(msg.url))}));return;}
+          ws.send(JSON.stringify({type:'background_state',processes:background.list()}));return;
         }
         if (['get_workbench','pin_context','unpin_context','attach_context','detach_context','get_checkpoints','checkpoint_diff','restore_checkpoint','configure_budget','get_mcp_tools','start_preview','stop_preview'].includes(msg.type)) {
           const sessionId = String(msg.sessionId || '');
@@ -752,6 +766,7 @@ export async function startStudio(options?: number | StudioOptions): Promise<Stu
               broadcast({ type: 'teamwork_event', event: { type: 'task_snapshot', ...teamworkState } });
               broadcast({ type: 'teamwork_event', event: { type: 'session_end', sessionId: teamworkState.sessionId, status: interruptedStatus, message: interruptedStatus === 'cancelled' ? 'Phiên đã dừng.' : 'Phiên dừng do lỗi; xem nhật ký để biết nguyên nhân.' } });
             }
+            activeAbort?.abort();
             busy = false; activeAbort = undefined; activeTeam = undefined;
             broadcast({ type: 'sessions', sessions: db.sessions() });
             broadcast({ type: 'run_end' });
@@ -791,6 +806,7 @@ export async function startStudio(options?: number | StudioOptions): Promise<Stu
     if (isClosed) return;
     isClosed = true;
     activeAbort?.abort(); activeTeam?.stop();
+    unwatchBackground(); await background.close();
 
     for (const [, pending] of pendingApprovals.entries()) {
       clearTimeout(pending.timer);

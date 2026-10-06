@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { BackgroundProcesses } from './background-processes.js';
 import readline from 'node:readline/promises';
 import process from 'node:process';
 import { loadConfig, assertConfigured } from './config.js';
@@ -315,6 +316,7 @@ async function main() {
         studioInstance = undefined;
       }
       db.close();
+      await BackgroundProcesses.closeAll();
       process.exit(130);
     }
   });
@@ -337,7 +339,7 @@ async function main() {
           router,
           new Tools(c.workspace, approve)
         ).run(line, undefined, undefined, [], {
-          state: memory,
+          state: memory, sessionId:chatSession,
           checkpoint: state => db.saveConversation(chatSession, state),
           onItem: item => {
             db.archiveItem(chatSession, item);
@@ -353,7 +355,7 @@ async function main() {
     } catch (e) {
       if (!line.startsWith('/')) db.session(chatSession, 'failed', c.model);
       console.error(e instanceof Error ? e.message : e);
-    }
+    } finally { await BackgroundProcesses.forWorkspace(c.workspace).stopSession(chatSession); }
   }
   if (studioInstance) {
     await studioInstance.close();

@@ -37,6 +37,7 @@ function continuationTail(prefix: string, text: string) {
 }
 
 export interface AgentMemoryOptions {
+  sessionId?:string;
   journal?: RunJournal;
   resume?: boolean;
   budgetTracker?: BudgetTracker;
@@ -77,7 +78,7 @@ export class Agent {
     let context = new ConversationContext(config, state, memoryOptions.onContext, checkpoint);
     const observeContext = () => { context.onModelRequest = model => { budget.modelCall(model); publishBudget(); }; context.onUsage = (usage, _regular, model) => { budget.recordUsage(model || this.client.config.model, usage); publishBudget(); }; };
     observeContext();
-    this.tools.setCheckpointContext?.(config.workspace || this.root, memoryOptions.journal?.key);
+    this.tools.setCheckpointContext?.(config.workspace || this.root, memoryOptions.journal?.key || memoryOptions.sessionId);
     const library = new SkillLibrary(memoryOptions.skillWorkspace || this.root);
     const profile = roleProfile(this.role, config);
     const assigned = assignedAgent(config, memoryOptions.namedAgentId, this.role);
@@ -213,7 +214,7 @@ export class Agent {
         if (++toolCount > maxTools) throw new Error(`Agent đã dùng ${maxTools} lượt công cụ. Context được giữ; tăng ngân sách trong Thiết lập agent nếu nhiệm vụ cần thêm.`);
         let parameters:Record<string,unknown>={};try{const parsed=JSON.parse(call.function.arguments);parameters=Object.fromEntries(['path','cwd','command','query','id'].filter(key=>parsed[key]!==undefined).map(key=>[key,String(parsed[key]).slice(0,2000)]));}catch{}
         this.log?.emit('tool_start', { agentId: this.id, tool: call.function.name, parameters });
-        const nonmutating = ['inspect_project', 'read_public_url', 'search_skills', 'load_skill', 'read_skill_resource', 'read_file', 'list_files', 'search_files', 'git_status', 'git_diff', 'git_log', 'recall_context', 'search_mcp_tools', 'activate_mcp_tools'].includes(call.function.name);
+        const nonmutating = ['list_background', 'background_status', 'check_background_health', 'inspect_project', 'read_public_url', 'search_skills', 'load_skill', 'read_skill_resource', 'read_file', 'list_files', 'search_files', 'git_status', 'git_diff', 'git_log', 'recall_context', 'search_mcp_tools', 'activate_mcp_tools'].includes(call.function.name);
         const journalTool = memoryOptions.journal?.beginTool(call, !nonmutating && !mcpSession.isReadOnly(call.function.name));
         budget.toolCall(); publishBudget();
         let value: {ok:boolean;[key:string]:unknown};
@@ -255,7 +256,7 @@ export class Agent {
       state.messages.push(...exchange);
       memoryOptions.journal?.finishBatch(state);
       if (stalledFailure) { context.publish(system, definitions); throw new Error(stalledFailure); }
-      const readOnlyRound = result.toolCalls.every(call => ['read_file', 'search_files', 'list_files', 'git_status', 'git_diff', 'read_skill_resource', 'recall_context'].includes(call.function.name));
+      const readOnlyRound = result.toolCalls.every(call => ['background_status', 'list_background', 'check_background_health', 'read_file', 'search_files', 'list_files', 'git_status', 'git_diff', 'read_skill_resource', 'recall_context'].includes(call.function.name));
       const fingerprint = readOnlyRound ? createHash('sha256').update(JSON.stringify({ calls: result.toolCalls.map(call => call.function), results: exchange.slice(1).map(item => item.content) })).digest('hex') : '';
       repeatedReads = fingerprint && fingerprint === previousRead ? repeatedReads + 1 : 1;
       previousRead = fingerprint;

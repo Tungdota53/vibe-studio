@@ -66,6 +66,19 @@ async function harness(configuration: Record<string, unknown> = {}, prepare?: (r
 }
 
 describe('Studio workbench WebSocket APIs', () => {
+  it('starts and stops an actual background process through the authenticated workspace API',async()=>{
+    const {root,socket}=await harness({},root=>fs.writeFileSync(path.join(root,'background.cjs'),'console.log("background-ready");setInterval(()=>{},1000);'));
+    await socket.request({type:'start_background',command:'node background.cjs',label:'API smoke'},'background_state');
+    let process:any;
+    for(let attempt=0;attempt<40;attempt++){
+      const state=await socket.request({type:'get_background'},'background_state');process=state.processes.find((item:any)=>item.label==='API smoke');
+      if(process?.log.includes('background-ready'))break;await new Promise(resolve=>setTimeout(resolve,50));
+    }
+    expect(process?.status).toBe('running');expect(process?.log).toContain('background-ready');
+    await socket.request({type:'stop_background',id:process.id},'background_state');
+    let state:any;for(let attempt=0;attempt<20;attempt++){state=await socket.request({type:'get_background'},'background_state');if(state.processes.find((item:any)=>item.id===process.id)?.status==='stopped')break;await new Promise(resolve=>setTimeout(resolve,50));}
+    expect(state.processes.find((item:any)=>item.id===process.id)?.status).toBe('stopped');
+  });
   it('exposes project memory and execution settings, and rejects controls for inactive sessions',async()=>{
     const {root,socket}=await harness({autoIntegrations:false},root=>fs.writeFileSync(path.join(root,'source.txt'),'v1'));
     const memory=await socket.request({type:'remember_project',sessionId:'chat-one',text:'Project fact',files:['source.txt']},'operations_state');expect(memory.memory[0].stale).toBe(false);

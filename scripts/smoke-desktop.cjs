@@ -201,6 +201,11 @@ app.on('browser-window-created', (_, win) => {
       await win.webContents.executeJavaScript(`document.getElementById('workbench-button').click()`);
       await wait(win, `document.querySelectorAll('.wb-section').length>=5`);
       assert(await win.webContents.executeJavaScript(`document.querySelectorAll('.wb-checkpoint').length>=2`));
+      fs.writeFileSync(path.join(root,'background-smoke.cjs'),'console.log("desktop-background-ready");setInterval(()=>{},1000);');
+      await win.webContents.executeJavaScript(`document.querySelector('#wb-background form input').value='Desktop background';document.querySelectorAll('#wb-background form input')[1].value='node background-smoke.cjs';document.querySelector('#wb-background form').requestSubmit();`);
+      await wait(win, `document.getElementById('wb-background-list').textContent.includes('desktop-background-ready')`);
+      await win.webContents.executeJavaScript(`document.querySelector('#wb-background-list button').click()`);
+      await wait(win, `document.getElementById('wb-background-list').textContent.includes('Đã thu hồi')`);
       await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.wb-checkpoint')).find(b=>b.textContent.includes('write_file')).click()`);
       await wait(win, `document.querySelector('#wb-checkpoint-detail input[type=checkbox]')!==null`);
       await win.webContents.executeJavaScript(`{const section=Array.from(document.querySelectorAll('.wb-section')).find(s=>s.querySelector('h3').textContent.includes('Ngân sách mỗi'));const inputs=section.querySelectorAll('input');inputs[0].value='500000';inputs[3].value='2';inputs[4].value='5';section.querySelector('form').requestSubmit();}`);
