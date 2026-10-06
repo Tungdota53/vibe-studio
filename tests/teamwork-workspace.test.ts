@@ -48,6 +48,22 @@ function runner(root: string, plan: any[], reply: (messages: Message[]) => Promi
   return { team: new Teamwork(config, store, client, new ModelRouter(config), async () => false), store };
 }
 describe('Teamwork workspace mode', () => {
+  it('retains one recovery campaign when the tester changes its failed command every round',async()=>{
+    const dir=root();let fixes=0,checks=0;
+    const {team}=runner(dir,[{id:'code',role:'coder',title:'Code',description:'create',expectedFiles:['a.txt']},{id:'test',role:'tester',title:'Verify',description:'verify',dependencies:['code']}],async messages=>{
+      const request=messages.findLast(message=>message.role==='user')?.content||'',repair=request.startsWith('[REPAIR]'),diagnosis=request.startsWith('[RECOVERY DIAGNOSIS]');
+      if(!messages.some(message=>message.role==='tool')){
+        if(repair)fixes++;
+        const command=`node -e "process.exit(1) /*attempt-${checks++}*/"`;
+        return {content:'',toolCalls:[{id:'actual',type:'function',function:{name:request==='verify'?'run_command':repair||request==='create'?'write_file':'read_file',arguments:JSON.stringify(request==='verify'?{command}:repair||request==='create'?{path:'a.txt',content:'source '+fixes}:{path:'a.txt'})}}]};
+      }
+      return {content:diagnosis?'{"rootCause":"recorded test always exits 1","evidence":["inspected source and runner output"],"nextAction":"verify a different hypothesis without weakening tests"}':request==='verify'?'FAIL':repair||request==='create'?'done':'{"verdict":"PASS","findings":[]}',toolCalls:[]};
+    });
+    const result=await team.run('Recover rotating failures without restarting',()=>{});
+    expect(result.gate.verdict).toBe('FAIL');expect(fixes).toBe(8);expect(result.tasks.some(task=>task.id==='repair-9')).toBe(false);
+    const saved=JSON.parse(fs.readFileSync(path.join(dir,'.vibe/sessions',result.id,'resume.json'),'utf8'));
+    expect(saved.recoveryCampaign.transitions).toBe(8);expect(saved.recoveryLedger).toHaveLength(9);expect(saved.recoveryLedger.every((round:any)=>round.progressed===false)).toBe(true);
+  },60000);
   it('canonicalizes copied skill aliases and resumes a legacy blocked DAG without replanning', async () => {
     const dir = root(); fs.writeFileSync(path.join(dir, 'existing.txt'), 'source');
     fs.cpSync('src/vendor-skills/trailofbits/audit-context-building', path.join(dir, '.vibe/skills/auto/trailofbits/audit-context-building'), { recursive: true });

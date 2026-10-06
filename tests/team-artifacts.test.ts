@@ -3,6 +3,14 @@ import { executionDiagnosis, qualityGate, recordEvidence, verificationEvidence, 
 import { parseTeamPlan } from '../src/teamwork.js';
 
 describe('Independent teamwork evidence', () => {
+  it('treats exact browser discovery as advisory but never hides required probes or shell payloads',()=>{
+    for(const command of ['where chrome','where msedge','where chrome && where msedge','where chrome & where msedge']){
+      expect(isEnvironmentProbe(command)).toBe(true);expect(isEnvironmentProbe(command,[command])).toBe(false);
+      const proof:TaskEvidence={inspected:true,successfulChecks:0,failedChecks:1,toolErrors:0,checks:[{command,exitCode:1,excerpt:'not found'}]};
+      expect(verificationEvidence({},proof)).toMatchObject({successfulChecks:0,failedChecks:0,warnings:1});
+    }
+    for(const command of ['where chrome && npm test','where chrome > proof.txt','where chrome & exit 1','where firefox','npm audit --json'])expect(isEnvironmentProbe(command)).toBe(false);
+  });
   it('uses the latest completed check without deleting earlier failures; required checks and real audit still block',()=>{
     const proof:TaskEvidence={inspected:true,successfulChecks:1,failedChecks:3,toolErrors:0,checks:[{command:'npm run build',exitCode:1,excerpt:'ENOENT'},{command:'npm run build',exitCode:0,excerpt:'built'},{command:'npm ls playwright @playwright/test --depth=0',exitCode:1,excerpt:'missing runtime'},{command:'rg -n "secret|token" src',exitCode:1,excerpt:'no matches'}]};
     expect(verificationEvidence({},proof)).toMatchObject({successfulChecks:1,failedChecks:0,warnings:2});expect(proof.checks).toHaveLength(4);

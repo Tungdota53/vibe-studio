@@ -18,6 +18,8 @@ export function isEnvironmentProbe(command: string, required: readonly string[] 
   if (required.some(item => item.trim().replace(/\s+/g, ' ') === normalized)) return false;
   if (/^(?:python(?:3)?|py|node|npm|npx|git|ruby|go|cargo|rustc|java)(?:\.exe)? (?:--version|-V)$/i.test(normalized)) return true;
   if(standalone(command)&&/^npm ls (?:playwright|playwright-core|@playwright\/test)(?: (?:playwright|playwright-core|@playwright\/test))* --depth=0$/.test(normalized))return true;
+  // Exact browser discovery probes are availability evidence, never passing tests.
+  if(/^where(?:\.exe)? (?:chrome|msedge)(?:\.exe)?(?:\s*(?:&&|&)\s*where(?:\.exe)? (?:chrome|msedge)(?:\.exe)?)?$/i.test(normalized))return true;
   // A narrowly recognized import-only availability check. Tests, assertions,
   // additional statements and shell chains never receive this exemption.
   const python = command.trim().match(/^(?:python(?:3)?|py)(?:\.exe)? -c (["'])([\s\S]+)\1$/i);

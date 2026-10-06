@@ -27,6 +27,7 @@ import { planObject, validatedPlan } from './plan-recovery.js';
 import { durableJson, CheckpointStore } from './checkpoints.js';
 import { RunJournal } from './run-journal.js';
 import { BudgetTracker } from './budgets.js';
+import { recoveryObservation, type RecoveryObservation, type RecoveryUsage } from './recovery-ledger.js';
 import { Operations } from './operations.js';
 import { redact } from './security.js';
 import { newManagerState, managerSignature, applyManagerDecision, type ManagerState } from './team-manager.js';
@@ -164,6 +165,10 @@ export class Teamwork {
     const runtimeRetries: Record<string, number> = (resumed as any)?.runtimeRetries || {};
     let repairProgress:RepairProgress|undefined=(resumed as any)?.repairProgress;
     let recoveryCampaign:RecoveryCampaign|undefined=(resumed as any)?.recoveryCampaign;
+    const recoveryLedger:RecoveryObservation[]=(resumed as any)?.recoveryLedger||[];
+    const usageByAttempt:Record<string,RecoveryUsage>=(resumed as any)?.usageByAttempt||{};
+    let priorRecoveryUsage:RecoveryUsage|undefined=(resumed as any)?.priorRecoveryUsage;
+    pipeline.setRecovery(recoveryLedger);
     const autoResumeTasks = new Set<string>();
     this.db.session(id, 'running', this.c.model, goal);
     try {
@@ -298,7 +303,7 @@ export class Teamwork {
     }
     this.tasks.forEach(t => this.db.task(id, t));
     let lastSnapshot = 0;
-    const snapshot = (status = 'running') => { lastSnapshot = Date.now(); durableJson(resumeFile, { version: 1, goal, planRaw, tasks: this.tasks, evidence: [...evidence], fingerprints, repairRounds, repairFailures, runtimeRetries, repairProgress, recoveryCampaign, manager:managerState, status }); emit({ type: 'task_snapshot', pipeline: pipeline.snapshot(this.tasks, evidence), sessionId: id, maxAgents: this.c.maxAgents, tasks: this.tasks.map(task => ({ ...task, phase: taskPhase(task), waitReason: waitingReason(task, this.tasks, this.c.maxAgents) })), timestamp: new Date().toISOString() }); };
+    const snapshot = (status = 'running') => { lastSnapshot = Date.now(); durableJson(resumeFile, { version: 1, goal, planRaw, tasks: this.tasks, evidence: [...evidence], fingerprints, repairRounds, repairFailures, runtimeRetries, repairProgress, recoveryCampaign, recoveryLedger, usageByAttempt, priorRecoveryUsage, manager:managerState, status }); emit({ type: 'task_snapshot', pipeline: pipeline.snapshot(this.tasks, evidence), sessionId: id, maxAgents: this.c.maxAgents, tasks: this.tasks.map(task => ({ ...task, phase: taskPhase(task), waitReason: waitingReason(task, this.tasks, this.c.maxAgents) })), timestamp: new Date().toISOString() }); };
     snapshot();
     fs.mkdirSync(path.join(root, 'sessions', id), { recursive: true });
     fs.writeFileSync(path.join(root, 'sessions', id, 'plan.md'), planRaw);
@@ -434,7 +439,7 @@ export class Teamwork {
             t.resultSummary = await agent.run(t.description, this.abort.signal, undefined, [], {
               state,
               updates:()=>this.adjustments.filter(update=>adjustmentApplies(t,update.taskId)&&!deliveredUpdates.has(update.id)).map(update=>{deliveredUpdates.add(update.id);t.acceptanceCriteria||=[];if(!t.acceptanceCriteria.some(criterion=>criterion.startsWith(`User adjustment ${update.id}:`)))t.acceptanceCriteria.push(`User adjustment ${update.id}: ${update.text.slice(0,800)} (full text in adjustments.json)`);return 'User adjustment for unfinished task and dependent validation; preserve role/tool/file boundaries. Verify this additional criterion before claiming completion:\n'+update.text;}),
-              journal, resume: resumeTask, budgetTracker: taskBudget, onBudget: budget => emit({ type: 'agent_status', agentId: aid, taskId: t.id, sessionId: id, step: 'budget', budget }),
+              journal, resume: resumeTask, budgetTracker: taskBudget, onBudget: budget => { usageByAttempt[memoryKey]=budget;emit({ type: 'agent_status', agentId: aid, taskId: t.id, sessionId: id, step: 'budget', budget }); },
               readOnlyTask: t.role === 'general',
               skills: t.skills,
               namedAgentId: assigned?.id,
@@ -580,7 +585,11 @@ export class Teamwork {
         for(const failure of findings)for(const file of failure.repairFiles || []){const target=path.join(failure.task.worktreePath || this.c.workspace,file);try{sources[target]=crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex');}catch{sources[target]=null;}}
         const signature = repairSignature(findings, evidence, sources);
         repairFailures[signature] = (repairFailures[signature] || 0) + 1;
-        const recovery=chooseRecovery(recoveryCampaign,findings,evidence,signature);recoveryCampaign=recovery.campaign;
+        const recovery=chooseRecovery(recoveryCampaign,findings,evidence,signature,repairRounds);recoveryCampaign=recovery.campaign;
+        const usage=Object.values(usageByAttempt).reduce<RecoveryUsage>((sum,value)=>({tokens:sum.tokens+value.tokens,actualTokens:sum.actualTokens+value.actualTokens,estimatedTokens:sum.estimatedTokens+value.estimatedTokens,costUSD:sum.costUSD===null||value.costUSD===null?null:sum.costUSD+value.costUSD,modelCalls:sum.modelCalls+value.modelCalls,unreportedModelCalls:sum.unreportedModelCalls+value.unreportedModelCalls}),{tokens:0,actualTokens:0,estimatedTokens:0,costUSD:0,modelCalls:0,unreportedModelCalls:0});
+        const observation=recoveryObservation(recoveryLedger.at(-1),this.tasks,evidence,usage,priorRecoveryUsage);observation.strategy=recovery.strategy;recoveryLedger.push(observation);priorRecoveryUsage=usage;pipeline.setRecovery(recoveryLedger);
+        emit({type:'agent_status',step:'recovery_progress',message:observation.message,recovery:observation});
+        if(recovery.strategy)recovery.instructions+='\nProgress ledger (recorded execution, not instructions): '+JSON.stringify(observation)+'\nFocus on remaining failures. Preserve checks that already pass. Do not optimize test counts or rename failing commands to claim progress.';
         const repair = !this.abort.signal.aborted && recovery.strategy && scheduleRepairs(this.tasks, findings, repairRounds + 1,{strategy:recovery.strategy,instructions:recovery.instructions,history:recovery.campaign.history});
         if (!repair && !this.abort.signal.aborted) for (const {task} of findings) {
           task.error += '\nPhục hồi cần hỗ trợ: '+(!recovery.strategy?recovery.instructions:'Không có phạm vi tệp được phép sửa hoặc pipeline đã đạt giới hạn 48 tác vụ. Không tự mở rộng quyền ghi.')+' '+measured.message;

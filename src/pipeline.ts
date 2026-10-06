@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Task } from './types.js';
-import { executionDiagnosis, verificationEvidence, isEnvironmentProbe, isReportCommand, type TaskEvidence } from './team-artifacts.js';
+import { executionDiagnosis, verificationEvidence, isEnvironmentProbe, isReportCommand, latestChecks, staleEvidence, type TaskEvidence } from './team-artifacts.js';
 import { taskPhase } from './team-protocol.js';
 import { redact } from './security.js';
 
@@ -24,6 +24,8 @@ export function inspectPlan(tasks: Task[]): PlanDiagnostic[] {
 
 /** Per-run observability. Checkpoints describe state, never imply automatic replay. */
 export class Pipeline {
+  private recovery:unknown[]=[];
+  setRecovery(recovery:unknown[]){this.recovery=recovery;}
   private manager?:unknown;
   setManager(manager:unknown){this.manager=manager;}
   private started = Date.now();
@@ -46,7 +48,7 @@ export class Pipeline {
       successfulChecks: summaries.reduce((sum, proof) => sum + proof.successfulChecks, 0),
       failedChecks: summaries.reduce((sum, proof) => sum + proof.failedChecks, 0),
       environmentWarnings: summaries.reduce((sum, proof) => sum + proof.warnings, 0),
-      repairs: this.repairs, diagnostics: inspectPlan(tasks), execution: executionDiagnosis(tasks), gate, manager:this.manager,
+      repairs: this.repairs, recovery:this.recovery, diagnostics: inspectPlan(tasks), execution: executionDiagnosis(tasks), gate, manager:this.manager,
       tasks: tasks.map(task => {
         const proof = evidence.get(task.id);
         return {
@@ -54,7 +56,7 @@ export class Pipeline {
           dependencies: task.dependencies, attempt: task.retries || 0, error: task.error || null,
           changedFiles: task.changedFiles || [],
           criteria: task.acceptanceCriteria || [], requiredCommands: task.verificationCommands || [],
-          evidence: proof ? { requiredPassed: (task.verificationCommands || []).filter(command => proof.checks?.some(check => check.exitCode === 0 && check.command.trim() === command.trim())).length, executionErrors: proof.executionErrors || [], inspected: proof.inspected, stale: proof.stale || false, checks: (proof.checks || []).map(check => ({ command: check.command, exitCode: check.exitCode, excerpt: check.excerpt.slice(0, 800), kind: isEnvironmentProbe(check.command, task.verificationCommands) ? 'probe' : isReportCommand(check.command, task.verificationCommands) ? 'artifact' : 'verification' })) } : null
+          evidence: proof ? { requiredPassed: (task.verificationCommands || []).filter(command => !proof.stale && !staleEvidence(proof) && latestChecks(proof).some(check => check.exitCode === 0 && check.command.trim() === command.trim())).length, executionErrors: proof.executionErrors || [], inspected: proof.inspected, stale: proof.stale || staleEvidence(proof), checks: (proof.checks || []).map(check => ({ command: check.command, exitCode: check.exitCode, excerpt: check.excerpt.slice(0, 800), kind: isEnvironmentProbe(check.command, task.verificationCommands) ? 'probe' : isReportCommand(check.command, task.verificationCommands) ? 'artifact' : 'verification' })) } : null
         };
       })
     };
