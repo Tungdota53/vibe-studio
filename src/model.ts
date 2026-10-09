@@ -1,7 +1,7 @@
 import type { Config } from './config.js';
 import type { Message, TokenUsage, ToolCall } from './types.js';
 export interface ChatResult { content: string; toolCalls: ToolCall[]; usage?: TokenUsage; model: string }
-export interface ChatOptions { maxOutputTokens?: number; timeoutMs?: number; retryAttempts?: number }
+export interface ChatOptions { maxOutputTokens?: number; timeoutMs?: number; retryAttempts?: number; idleTimeoutMs?:number; onActivity?:(kind:'text'|'tool')=>void }
 export interface ModelCapabilities { id: string; contextWindow?: number; maxOutputTokens?: number }
 export class ModelResponseError extends Error {
   constructor(message: string, public readonly partialOutput: boolean, options?: ErrorOptions) { super(message, options); this.name = 'ModelResponseError'; }
@@ -54,21 +54,26 @@ export class ModelClient {
     let requestUsage = this.usageSupported;
     const timeoutMs = Math.max(1000, Math.min(180000, Math.floor(options.timeoutMs || 180000)));
     const attempts = Math.max(1, Math.min(4, Math.floor(options.retryAttempts || 4)));
+    const expiresAt=Date.now()+timeoutMs;
+    const retrySignal=()=>AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(Math.max(1,expiresAt-Date.now()))]);
     for (let attempt = 0; attempt < attempts; attempt++) {
       signal?.throwIfAborted();
+      const remainingMs=expiresAt-Date.now();if(remainingMs<=0)throw new Error('Model request deadline exceeded; retry budget shares one deadline.');
+      const idle=new AbortController();let idleTimer:ReturnType<typeof setTimeout>|undefined;
+      const touch=()=>{clearTimeout(idleTimer);idleTimer=setTimeout(()=>idle.abort(new Error('Model stream idle timeout: no data received')),Math.max(250,Math.min(remainingMs,options.idleTimeoutMs||60000)));};touch();
       let emitted = false;
       try {
         const response = await fetch(`${this.c.baseUrl}/chat/completions`, {
           method: 'POST', headers: { Authorization: `Bearer ${this.c.apiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ model, messages, ...(tools.length ? { tools, tool_choice: 'auto' } : {}), stream: true, ...(requestUsage ? { stream_options: { include_usage: true } } : {}), ...(options.maxOutputTokens ? { max_tokens: options.maxOutputTokens } : {}) }),
-          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs)
+          signal: AbortSignal.any([...(signal?[signal]:[]),idle.signal,AbortSignal.timeout(remainingMs)])
         });
         if (response.status === 401 || response.status === 403) throw new Error(`Xác thực API thất bại (HTTP ${response.status}); kiểm tra khóa API`);
         if (!response.ok) {
           const detail = (await response.text()).slice(0, 500);
           // Some compatible routers do not implement streaming usage yet.
           if (response.status === 400 && requestUsage && /stream_options|include_usage/i.test(detail)) { requestUsage = false; this.usageSupported = false; continue; }
-          if (response.status === 429 || response.status >= 500) { last = new Error(`HTTP ${response.status}: ${detail}`); if (attempt < attempts - 1) await this.backoff(attempt, signal); continue; }
+          if (response.status === 429 || response.status >= 500) { last = new Error(`HTTP ${response.status}: ${detail}`); if (attempt < attempts - 1) await this.backoff(attempt, retrySignal()); continue; }
           throw new Error(`API HTTP ${response.status}: ${detail}`);
         }
         if (!response.body) throw new Error('Response không có stream');
@@ -87,8 +92,9 @@ export class ModelClient {
           }
           const delta = json.choices?.[0]?.delta;
           if (typeof json.choices?.[0]?.finish_reason === 'string') finishReason = json.choices[0].finish_reason;
-          if (delta?.content) { emitted = true; content += delta.content; onToken?.(delta.content); }
+          if (delta?.content) { options.onActivity?.('text'); emitted = true; content += delta.content; onToken?.(delta.content); }
           for (const call of delta?.tool_calls || []) {
+            options.onActivity?.('tool');
             emitted = true;
             const previous = calls.get(call.index) || { id: call.id || '', type: 'function' as const, function: { name: '', arguments: '' } };
             previous.id ||= call.id || ''; previous.function.name += call.function?.name || ''; previous.function.arguments += call.function?.arguments || ''; calls.set(call.index, previous);
@@ -100,9 +106,10 @@ export class ModelClient {
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split(/\r?\n/); buffer = lines.pop() || '';
-            for (const line of lines) consume(line);
+            touch();for (const line of lines) { consume(line);if(doneMarker)break; }
+            if(doneMarker){void reader.cancel().catch(()=>{});break;}
           }
-          buffer += decoder.decode(); if (buffer.trim()) consume(buffer);
+          buffer += decoder.decode(); if (!doneMarker && buffer.trim()) consume(buffer);
         } catch (error) {
           signal?.throwIfAborted();
           if (/API stream/i.test(String(error))) throw error;
@@ -130,8 +137,8 @@ export class ModelClient {
         // Replaying after visible output could duplicate text or tool actions.
         if (emitted) throw new ModelResponseError(error instanceof Error ? error.message : String(error), true, { cause: error });
         if (/Xác thực|API HTTP|API stream/i.test(String(error))) throw error;
-        if (attempt < attempts - 1) await this.backoff(attempt, signal);
-      }
+        if (attempt < attempts - 1) await this.backoff(attempt, retrySignal());
+      } finally { clearTimeout(idleTimer); }
     }
     throw last || new Error('API không chấp nhận cấu hình streaming.');
   }

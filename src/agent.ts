@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { Role, Message, TokenUsage } from './types.js';
 import { createHash } from 'node:crypto';
 import { ModelClient, ModelResponseError, ModelStreamInterruptedError } from './model.js';
@@ -38,6 +39,7 @@ function continuationTail(prefix: string, text: string) {
 
 export interface AgentMemoryOptions {
   sessionId?:string;
+  onModelActivity?:()=>void;
   journal?: RunJournal;
   resume?: boolean;
   budgetTracker?: BudgetTracker;
@@ -103,6 +105,8 @@ export class Agent {
     let previousRead = '', repeatedReads = 0;
     const readOccurrences=new Map<string,number>();
     const repeatedFailures = new Map<string, number>();
+    const unchangedWrites=new Map<string,number>();
+    const writtenVersions=new Map<string,number>();
     const refocus=()=>{
       if((state.recoveryFocuses||0)>=1)return false;
       checkpoint(state);state.recoveryFocuses=(state.recoveryFocuses||0)+1;
@@ -142,7 +146,7 @@ export class Agent {
             for (let recovery = 0; ; recovery++) {
               try {
                 budget.modelCall(model); publishBudget();
-                const reply = await this.client.chat(messages, definitions, model, signal, recovery ? undefined : token => { visibleOutput = true; onToken?.(token); }, { maxOutputTokens: context.limits.output });
+                const reply = await this.client.chat(messages, definitions, model, signal, recovery ? undefined : token => { visibleOutput = true; onToken?.(token); }, { maxOutputTokens: context.limits.output, onActivity:memoryOptions.onModelActivity });
                 if (recovery) {
                   reply.content = continuationTail(recoveredPrefix, reply.content);
                   const pendingText = recoveredPrefix.slice(visiblePrefixLength) + reply.content;
@@ -246,12 +250,17 @@ export class Agent {
         this.log?.emit('tool_end', { agentId: this.id, tool: call.function.name, ok: value.ok, checkpointId:value.checkpointId, outcome:String(value.output||value.error||'').slice(0,3000) });
         if (!value.ok) {
           let argumentsValue: unknown; try { argumentsValue = JSON.parse(call.function.arguments); } catch { argumentsValue = call.function.arguments; }
-          const signature = JSON.stringify([call.function.name, argumentsValue, value.error]);
+          const signature = JSON.stringify([call.function.name, argumentsValue, value.error, value.output]);
           const count = (repeatedFailures.get(signature) || 0) + 1;
           repeatedFailures.set(signature, count);
           if (repeatedFailures.size > 64) repeatedFailures.delete(repeatedFailures.keys().next().value!);
           if (count >= 4) stalledFailure = `Agent không tiến triển: ${call.function.name} lặp cùng thao tác lỗi ${count} lần. Kết quả và checkpoint đã lưu; sửa nguyên nhân trước khi thử lại.`;
-        } else if (['write_file','edit_file'].includes(call.function.name)&&value.sourceChanged===true) {repeatedFailures.clear();readOccurrences.clear();}
+        } else if (['write_file','edit_file'].includes(call.function.name)) {
+          if(value.sourceChanged===true){readOccurrences.clear();
+            if(typeof value.sourceFingerprint==='string'){const target=path.resolve(this.root,String(JSON.parse(call.function.arguments).path));const key=JSON.stringify([process.platform==='win32'?target.toLowerCase():target,value.sourceFingerprint]),count=(writtenVersions.get(key)||0)+1;writtenVersions.set(key,count);if(writtenVersions.size>128)writtenVersions.delete(writtenVersions.keys().next().value!);if(count>=4)stalledFailure='Agent không tiến triển: mã nguồn bị sửa qua lại cùng trạng thái 4 lần; cần tái hiện và đổi giả thuyết, không tiếp tục đảo bản sửa.';}
+          }
+          else if(value.sourceChanged===false){const key=JSON.stringify([call.function.name,JSON.parse(call.function.arguments)]),count=(unchangedWrites.get(key)||0)+1;unchangedWrites.set(key,count);if(count>=4)stalledFailure='Agent không tiến triển: lặp ghi tệp không tạo thay đổi 4 lần. Dùng nguồn hiện tại để kiểm thử hoặc chọn cách sửa khác; checkpoint được giữ.';}
+        }
       }
       state.messages.push(...exchange);
       memoryOptions.journal?.finishBatch(state);

@@ -20,7 +20,7 @@ async function run(command){
 let result;
 try{
   await run('npm run build');
-  await run('npm test -- --reporter=json --outputFile=.vibe/release-test-results.json');
+  await run('npm test -- '+(process.platform==='win32'?'--maxWorkers=1 ':'')+'--reporter=json --outputFile=.vibe/release-test-results.json');
   const test=JSON.parse(fs.readFileSync('.vibe/release-test-results.json','utf8'));
   if(!test.success||test.numFailedTests||!test.numPassedTests)throw new Error('Test result does not prove a successful test suite');
   process.env.VIBE_SMOKE_WORKSPACE=path.resolve('.vibe/release-ui-'+crypto.randomUUID());

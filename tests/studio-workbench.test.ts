@@ -66,6 +66,11 @@ async function harness(configuration: Record<string, unknown> = {}, prepare?: (r
 }
 
 describe('Studio workbench WebSocket APIs', () => {
+  it('releases the database and subscriptions when binding fails instead of leaking startup resources',async()=>{
+    vi.spyOn(http.Server.prototype,'listen').mockImplementation(function(this:http.Server){queueMicrotask(()=>this.emit('error',Object.assign(new Error('simulated listen failure'),{code:'ENOBUFS'})));return this;} as any);
+    await expect(harness()).rejects.toThrow('simulated listen failure');
+    const root=roots.at(-1)!;fs.rmSync(path.join(root,'.vibe'),{recursive:true,force:true,maxRetries:3,retryDelay:100});expect(fs.existsSync(path.join(root,'.vibe'))).toBe(false);
+  });
   it('starts and stops an actual background process through the authenticated workspace API',async()=>{
     const {root,socket}=await harness({},root=>fs.writeFileSync(path.join(root,'background.cjs'),'console.log("background-ready");setInterval(()=>{},1000);'));
     await socket.request({type:'start_background',command:'node background.cjs',label:'API smoke'},'background_state');

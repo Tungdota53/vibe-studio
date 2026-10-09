@@ -320,7 +320,7 @@ export async function startStudio(options?: number | StudioOptions): Promise<Stu
       candidatePort++;
     }
     throw new Error(`Failed to bind port after ${maxAttempts} attempts starting at ${targetPort}`);
-  })();
+  })().catch(async error=>{unwatchBackground();await preview.close();db.close();throw error;});
 
   const url =
     host === '127.0.0.1' || host === '0.0.0.0' || host === 'localhost'

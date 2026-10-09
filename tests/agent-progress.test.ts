@@ -21,6 +21,20 @@ function setup(reply:(messages:Message[])=>any) {
 }
 const read=(name:string)=>({content:'',toolCalls:[{id:'read-'+name,type:'function',function:{name:'read_file',arguments:JSON.stringify({path:name})}}]});
 describe('Agent progress budgets',()=>{
+  it('detects oscillating source edits while allowing many distinct useful edits',async()=>{
+    let turns=0;const loop=setup(()=>({content:'',toolCalls:[{id:'oscillate-'+(++turns),type:'function',function:{name:'write_file',arguments:JSON.stringify({path:'state.txt',content:turns%2?'A':'B'})}}]}));
+    await expect(loop.agent.run('Fix implementation')).rejects.toThrow('sửa qua lại');expect(turns).toBe(7);
+    let edits=0;const useful=setup(()=>edits<24?{content:'',toolCalls:[{id:'edit-'+(++edits),type:'function',function:{name:'write_file',arguments:JSON.stringify({path:'state.txt',content:String(edits)})}}]}:{content:'finished',toolCalls:[]});
+    expect(await useful.agent.run('Implement 24 distinct changes')).toBe('finished');expect(fs.readFileSync(path.join(useful.root,'state.txt'),'utf8')).toBe('24');
+  });
+  it('detects no-op write loops without blocking useful changed writes',async()=>{
+    let turns=0;const {agent,root}=setup(()=>{turns++;return {content:'',toolCalls:[{id:'write-'+turns,type:'function',function:{name:'write_file',arguments:'{"path":"same.txt","content":"same"}'}}]};});
+    fs.writeFileSync(path.join(root,'same.txt'),'same');await expect(agent.run('Finish work')).rejects.toThrow('không tạo thay đổi');expect(turns).toBe(4);
+  });
+  it('does not erase repeated failures when the model churns actual source between them',async()=>{
+    let turns=0;const {agent}=setup(()=>turns++%2?{content:'',toolCalls:[{id:'write-'+turns,type:'function',function:{name:'write_file',arguments:JSON.stringify({path:'churn.txt',content:String(turns)})}}]}:{content:'',toolCalls:[{id:'fail-'+turns,type:'function',function:{name:'missing_tool',arguments:'{}'}}]});
+    await expect(agent.run('Repair')).rejects.toThrow('lặp cùng thao tác lỗi 4 lần');expect(turns).toBe(7);
+  });
   it('rebuilds focused context and completes instead of failing at the unchanged-read threshold',async()=>{
     let turns=0;const {root,agent,state}=setup(messages=>{turns++;if(messages.some(message=>message.content?.startsWith('Recovery refocus:')))return {content:'finished using existing evidence',toolCalls:[]};return read('input.txt');});fs.writeFileSync(path.join(root,'input.txt'),'retained fact');
     expect(await agent.run('Implement',undefined,undefined,[],{state})).toBe('finished using existing evidence');expect(turns).toBe(7);expect(state.recoveryFocuses).toBe(1);expect(state.messages.some(message=>message.content?.includes('retained fact'))).toBe(true);

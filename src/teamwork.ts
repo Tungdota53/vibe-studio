@@ -436,9 +436,10 @@ export class Teamwork {
             const sessionMemory = this.db.conversation(id); state.pins = sessionMemory.pins; state.attachments = sessionMemory.attachments;
             state.messages.push({ role: 'user', content: dispatch });
             const recalled=operations.recall();if(recalled)state.messages.push({role:'user',content:'Project memory (historical evidence, validate before reuse):\n'+recalled});
-            const deliveredUpdates=new Set<string>();
+            const deliveredUpdates=new Set<string>();let lastStreamNotice=0;
             t.resultSummary = await agent.run(t.description, this.abort.signal, undefined, [], {
               state,
+              onModelActivity:()=>{t.lastProgressAt=new Date().toISOString();t.stalled=false;stallReported=false;step='model_stream';t.step=step;if(Date.now()-lastStreamNotice>=1000){lastStreamNotice=Date.now();emit({type:'agent_status',agentId:aid,taskId:t.id,status:'running',step,lastProgressAt:t.lastProgressAt,message:'Đang nhận phản hồi model; chưa phải bằng chứng hoàn thành.'});}},
               updates:()=>this.adjustments.filter(update=>adjustmentApplies(t,update.taskId)&&!deliveredUpdates.has(update.id)).map(update=>{deliveredUpdates.add(update.id);t.acceptanceCriteria||=[];if(!t.acceptanceCriteria.some(criterion=>criterion.startsWith(`User adjustment ${update.id}:`)))t.acceptanceCriteria.push(`User adjustment ${update.id}: ${update.text.slice(0,800)} (full text in adjustments.json)`);return 'User adjustment for unfinished task and dependent validation; preserve role/tool/file boundaries. Verify this additional criterion before claiming completion:\n'+update.text;}),
               journal, resume: resumeTask, budgetTracker: taskBudget, onBudget: budget => { usageByAttempt[memoryKey]=budget;emit({ type: 'agent_status', agentId: aid, taskId: t.id, sessionId: id, step: 'budget', budget }); },
               readOnlyTask: t.role === 'general',
